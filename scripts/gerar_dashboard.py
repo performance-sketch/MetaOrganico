@@ -5,11 +5,12 @@ Run: python scripts/gerar_dashboard.py
 """
 import json
 import pathlib
-from datetime import datetime
+from datetime import datetime, timedelta
 
-ROOT       = pathlib.Path(__file__).parent.parent
-DATA_FILE  = ROOT / "data" / "meta_organic.json"
-INDEX_FILE = ROOT / "index.html"
+ROOT        = pathlib.Path(__file__).parent.parent
+DATA_FILE   = ROOT / "data" / "meta_organic.json"
+ADS_FILE    = ROOT / "data" / "meta_ads_snapshot.json"
+INDEX_FILE  = ROOT / "index.html"
 
 
 def fmt_int(n):
@@ -121,6 +122,19 @@ def main():
 
     por_formato = agg_by_format(ig_rows)
 
+    corte_30d = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    ig_30d = [r for r in ig_rows if r["data"] >= corte_30d]
+    organico_30d = {
+        "alcance":    sum(r["alcance"] for r in ig_30d if r["alcance"] is not None),
+        "interacoes": sum(r["interacoes"] for r in ig_30d if r["interacoes"] is not None),
+        "visitas_perfil": sum(r["visitas_perfil"] for r in ig_30d if r["visitas_perfil"] is not None),
+        "posts": len(ig_30d),
+    }
+
+    ads = None
+    if ADS_FILE.exists():
+        ads = json.loads(ADS_FILE.read_text(encoding="utf-8")).get("d30")
+
     rankings = {
         "alcance":      top_n(ig_rows, "alcance"),
         "interacoes":   top_n(ig_rows, "interacoes"),
@@ -136,16 +150,54 @@ def main():
     por_formato_json  = json.dumps(por_formato, ensure_ascii=False)
     rankings_json     = json.dumps(rankings, ensure_ascii=False)
     perfil_json       = json.dumps(perfil, ensure_ascii=False)
+    ads_json          = json.dumps(ads, ensure_ascii=False)
+    organico_30d_json = json.dumps(organico_30d, ensure_ascii=False)
 
     def safe(s):
         """Evita que uma legenda contendo '</script' feche a tag prematuramente."""
         return s.replace("</script", "<\\/script")
 
-    ig_rows_json     = safe(ig_rows_json)
-    fb_rows_json     = safe(fb_rows_json)
-    por_formato_json = safe(por_formato_json)
-    rankings_json    = safe(rankings_json)
-    perfil_json      = safe(perfil_json)
+    ig_rows_json      = safe(ig_rows_json)
+    fb_rows_json      = safe(fb_rows_json)
+    por_formato_json  = safe(por_formato_json)
+    rankings_json     = safe(rankings_json)
+    perfil_json       = safe(perfil_json)
+    ads_json          = safe(ads_json)
+    organico_30d_json = safe(organico_30d_json)
+
+    if ads:
+        ads_section_html = f"""
+  <!-- KPIs Pagos -->
+  <div class="card mb-5">
+    <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+      <div style="font-weight:600;font-size:.9rem">💰 Meta Ads — Pago (últimos 30 dias)</div>
+      <span class="badge badge-gray">fonte: REPORTCLAUDE</span>
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+      <div><div class="kpi-label">Gasto</div><div class="kpi-val">R$ {ads.get('gasto', 0):,.0f}</div></div>
+      <div><div class="kpi-label">Impressões</div><div class="kpi-val">{fmt_int(ads.get('impressoes'))}</div></div>
+      <div><div class="kpi-label">Alcance</div><div class="kpi-val">{fmt_int(ads.get('alcance'))}</div></div>
+      <div><div class="kpi-label">Cliques</div><div class="kpi-val">{fmt_int(ads.get('cliques'))}</div></div>
+      <div><div class="kpi-label">CTR</div><div class="kpi-val">{ads.get('ctr', 0)}%</div></div>
+      <div><div class="kpi-label">CPC</div><div class="kpi-val">R$ {ads.get('cpc', 0)}</div></div>
+      <div><div class="kpi-label">CPM</div><div class="kpi-val">R$ {ads.get('cpm', 0)}</div></div>
+      <div><div class="kpi-label">Conversas</div><div class="kpi-val">{fmt_int(ads.get('conversas'))}</div></div>
+      <div><div class="kpi-label">Compras (Meta)</div><div class="kpi-val">{fmt_int(ads.get('compras_meta'))}</div></div>
+      <div><div class="kpi-label">ROAS</div><div class="kpi-val">{ads.get('roas', 0)}x</div></div>
+    </div>
+  </div>
+
+  <div class="card mb-5">
+    <div style="font-weight:600;font-size:.9rem;margin-bottom:16px">⚖️ Orgânico (IG) x Pago (Meta Ads) — últimos 30 dias</div>
+    <canvas id="chartOrganicoVsPago" height="90"></canvas>
+  </div>
+"""
+    else:
+        ads_section_html = """
+  <div class="card mb-5" style="border-color:var(--border)">
+    <div class="text-sm" style="color:var(--sub)">💰 KPIs pagos (Meta Ads) não disponível — rode <code>python scripts/fetch_meta_ads_snapshot.py</code> para trazer o snapshot do REPORTCLAUDE.</div>
+  </div>
+"""
 
     html = f"""<!DOCTYPE html>
 <html lang="pt-BR">
@@ -213,7 +265,7 @@ def main():
     <div class="card"><div class="kpi-label">Visitas ao perfil (IG)</div><div class="kpi-val">{fmt_int(total_visitas)}</div></div>
     <div class="card"><div class="kpi-label">Seguidores gerados (IG)</div><div class="kpi-val">{fmt_int(total_seguidores)}</div></div>
   </div>
-
+{ads_section_html}
   <!-- Por formato -->
   <div class="card mb-5">
     <div style="font-weight:600;font-size:.9rem;margin-bottom:16px">📊 Instagram — Desempenho médio por formato</div>
@@ -292,6 +344,8 @@ const IG_ROWS     = {ig_rows_json};
 const FB_ROWS     = {fb_rows_json};
 const POR_FORMATO = {por_formato_json};
 const RANKINGS    = {rankings_json};
+const ADS         = {ads_json};
+const ORGANICO_30D = {organico_30d_json};
 
 const fN = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('pt-BR');
 const trunc = (s, n) => (s || '').length > n ? s.slice(0, n) + '…' : (s || '—');
@@ -371,6 +425,21 @@ new Chart(document.getElementById('chartFormato'), {{
   options: {{ responsive:true, plugins:{{legend:{{labels:{{color:'#f1f5f9'}}}}}},
     scales:{{ x:{{ticks:{{color:'#94a3b8'}},grid:{{display:false}}}}, y:{{ticks:{{color:'#94a3b8'}},grid:{{color:'rgba(51,65,85,.4)'}}}} }} }}
 }});
+
+if (ADS) {{
+  new Chart(document.getElementById('chartOrganicoVsPago'), {{
+    type: 'bar',
+    data: {{
+      labels: ['Alcance', 'Cliques (pago) / Interações (orgânico)'],
+      datasets: [
+        {{ label: `Orgânico (IG, ${{ORGANICO_30D.posts}} posts)`, data: [ORGANICO_30D.alcance, ORGANICO_30D.interacoes], backgroundColor: '#ec4899' }},
+        {{ label: 'Pago (Meta Ads)', data: [ADS.alcance, ADS.cliques], backgroundColor: '#22c55e' }},
+      ]
+    }},
+    options: {{ responsive:true, plugins:{{legend:{{labels:{{color:'#f1f5f9'}}}}}},
+      scales:{{ x:{{ticks:{{color:'#94a3b8'}},grid:{{display:false}}}}, y:{{ticks:{{color:'#94a3b8'}},grid:{{color:'rgba(51,65,85,.4)'}}}} }} }}
+  }});
+}}
 </script>
 </body>
 </html>
