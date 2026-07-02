@@ -39,6 +39,7 @@ def build_ig_rows(media):
             "formato": media_format(p),
             "legenda": (p.get("caption") or "")[:140],
             "link": p.get("permalink", ""),
+            "thumb": p.get("thumbnail_url") or p.get("media_url") or "",
             "curtidas": p.get("like_count", 0) or 0,
             "comentarios": p.get("comments_count", 0) or 0,
             "alcance": ins.get("reach"),
@@ -179,6 +180,12 @@ def main():
   ::-webkit-scrollbar {{ width:6px; height:6px; }}
   ::-webkit-scrollbar-track {{ background:var(--bg); }}
   ::-webkit-scrollbar-thumb {{ background:var(--border); border-radius:3px; }}
+  .top3-wrap {{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:16px; }}
+  .top3-card {{ position:relative; display:block; border-radius:10px; overflow:hidden; background:var(--surface2); border:1px solid var(--border); text-decoration:none; color:inherit; }}
+  .top3-card img {{ width:100%; aspect-ratio:1/1; object-fit:cover; display:block; background:var(--bg); }}
+  .top3-rank {{ position:absolute; top:6px; left:6px; width:22px; height:22px; border-radius:99px; background:rgba(15,23,42,.85); color:#fff; font-size:.72rem; font-weight:700; display:flex; align-items:center; justify-content:center; }}
+  .top3-metric {{ position:absolute; bottom:0; left:0; right:0; padding:6px 8px; background:linear-gradient(0deg,rgba(15,23,42,.92),transparent); font-size:.78rem; font-weight:700; }}
+  .top3-metric small {{ display:block; font-size:.62rem; font-weight:500; color:var(--sub); text-transform:uppercase; letter-spacing:.03em; }}
 </style>
 </head>
 <body class="p-4 md:p-8 max-w-[1400px] mx-auto">
@@ -229,18 +236,22 @@ def main():
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
     <div class="card">
       <div style="font-weight:600;font-size:.9rem;margin-bottom:16px">🏆 Top 10 — Alcance (Instagram)</div>
+      <div id="top3-alcance" class="top3-wrap"></div>
       <div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Formato</th><th>Legenda</th><th style="text-align:right">Alcance</th></tr></thead><tbody id="rank-alcance"></tbody></table></div>
     </div>
     <div class="card">
       <div style="font-weight:600;font-size:.9rem;margin-bottom:16px">🏆 Top 10 — Interações (Instagram)</div>
+      <div id="top3-interacoes" class="top3-wrap"></div>
       <div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Formato</th><th>Legenda</th><th style="text-align:right">Interações</th></tr></thead><tbody id="rank-interacoes"></tbody></table></div>
     </div>
     <div class="card">
       <div style="font-weight:600;font-size:.9rem;margin-bottom:16px">🏆 Top 10 — Visitas ao perfil geradas (Instagram)</div>
+      <div id="top3-visitas" class="top3-wrap"></div>
       <div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Formato</th><th>Legenda</th><th style="text-align:right">Visitas</th></tr></thead><tbody id="rank-visitas"></tbody></table></div>
     </div>
     <div class="card">
       <div style="font-weight:600;font-size:.9rem;margin-bottom:16px">🏆 Top 10 — Salvamentos (Instagram)</div>
+      <div id="top3-salvos" class="top3-wrap"></div>
       <div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Formato</th><th>Legenda</th><th style="text-align:right">Salvos</th></tr></thead><tbody id="rank-salvos"></tbody></table></div>
     </div>
   </div>
@@ -308,6 +319,22 @@ preencherTabela('rank-alcance',      RANKINGS.alcance,      rankRow('alcance'));
 preencherTabela('rank-interacoes',   RANKINGS.interacoes,   rankRow('interacoes'));
 preencherTabela('rank-visitas',      RANKINGS.visitas_perfil, rankRow('visitas_perfil'));
 preencherTabela('rank-salvos',       RANKINGS.salvos,       rankRow('salvos'));
+
+const rotuloMetrica = {{ alcance:'Alcance', interacoes:'Interações', visitas_perfil:'Visitas ao perfil', salvos:'Salvos' }};
+function renderTop3(id, rows, campo) {{
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = rows.slice(0, 3).map((r, i) => `
+    <a class="top3-card" href="${{r.link || '#'}}" target="_blank" title="${{(r.legenda||'').replace(/"/g,'&quot;')}}">
+      <span class="top3-rank">#${{i+1}}</span>
+      ${{r.thumb ? `<img src="${{r.thumb}}" loading="lazy" alt="">` : `<div style="aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;color:var(--sub);font-size:.7rem">sem imagem</div>`}}
+      <div class="top3-metric">${{fN(r[campo])}}<small>${{rotuloMetrica[campo]}} · ${{r.formato}}</small></div>
+    </a>`).join('');
+}}
+renderTop3('top3-alcance',    RANKINGS.alcance,        'alcance');
+renderTop3('top3-interacoes', RANKINGS.interacoes,     'interacoes');
+renderTop3('top3-visitas',    RANKINGS.visitas_perfil, 'visitas_perfil');
+renderTop3('top3-salvos',     RANKINGS.salvos,         'salvos');
 
 preencherTabela('ig-body', IG_ROWS, r => `<tr>
   <td style="white-space:nowrap">${{r.data}}</td>
