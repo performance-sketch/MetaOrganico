@@ -79,7 +79,14 @@ def resolve_targets(token=None):
 
 
 def fetch_facebook_posts(page_id, page_token, days=90):
-    """Posts orgânicos da Page (com insights de impressões/alcance/engajamento e reações)."""
+    """Posts orgânicos da Page (cliques/video views + reações).
+
+    IMPORTANTE: a Graph API descontinuou post_impressions, post_reach e
+    post_engaged_users para posts de Page (removidos globalmente, independente
+    da versão da API pinada). Não há mais como obter alcance/impressões de
+    posts do Facebook via API — só pelo export manual do Meta Business Suite.
+    Por isso esses campos vêm como None ("não disponível"), nunca como 0.
+    """
     corte = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
     todos, data = [], _get(f"{page_id}/posts", page_token, {
@@ -99,22 +106,24 @@ def fetch_facebook_posts(page_id, page_token, days=90):
     for post in todos:
         pid = post.get("id", "")
         try:
-            ins = _get(f"{pid}/insights", page_token, {
-                "metric": "post_impressions,post_reach,post_engaged_users,post_clicks",
-            })
+            ins = _get(f"{pid}/insights", page_token, {"metric": "post_clicks,post_video_views"})
             insights = {}
             for item in ins.get("data", []):
                 vals = item.get("values") or [{}]
                 insights[item["name"]] = int(vals[-1].get("value", 0) or 0)
         except requests.RequestException:
             insights = {}
+
+        curtidas = comentarios = compart = None
         try:
             reacts = _get(pid, page_token, {"fields": "reactions.summary(true),comments.summary(true),shares"})
-            curtidas    = reacts.get("reactions", {}).get("summary", {}).get("total_count", 0)
-            comentarios = reacts.get("comments", {}).get("summary", {}).get("total_count", 0)
-            compart     = reacts.get("shares", {}).get("count", 0) if reacts.get("shares") else 0
+            curtidas    = int(reacts.get("reactions", {}).get("summary", {}).get("total_count", 0) or 0)
+            comentarios = int(reacts.get("comments", {}).get("summary", {}).get("total_count", 0) or 0)
+            compart     = int(reacts.get("shares", {}).get("count", 0) or 0) if reacts.get("shares") else 0
         except requests.RequestException:
-            curtidas = comentarios = compart = 0
+            # Requer a permissão 'pages_read_user_content' no token — se ausente,
+            # ficam None (não disponível) em vez de 0.
+            pass
 
         resultado.append({
             "id": pid,
@@ -122,13 +131,14 @@ def fetch_facebook_posts(page_id, page_token, days=90):
             "tipo": post.get("type", "status"),
             "mensagem": (post.get("message") or post.get("story") or "")[:180],
             "criado_em": post.get("created_time", "")[:10],
-            "impressoes": insights.get("post_impressions", 0),
-            "alcance": insights.get("post_reach", 0),
-            "engajados": insights.get("post_engaged_users", 0),
-            "cliques": insights.get("post_clicks", 0),
-            "curtidas": int(curtidas or 0),
-            "comentarios": int(comentarios or 0),
-            "compartilhamentos": int(compart or 0),
+            "impressoes": None,   # não disponível via API (descontinuado)
+            "alcance": None,      # não disponível via API (descontinuado)
+            "engajados": None,    # não disponível via API (descontinuado)
+            "cliques": insights.get("post_clicks"),
+            "video_views": insights.get("post_video_views"),
+            "curtidas": curtidas,
+            "comentarios": comentarios,
+            "compartilhamentos": compart,
         })
     return resultado
 
@@ -145,8 +155,11 @@ def _fetch_media_insights_batch(media_list, token):
         lote  = ids[i:i + 50]
         batch = []
         for mid in lote:
-            metrics = "plays,saved,shares,reach,impressions" if tipos.get(mid) in ("REELS", "REEL", "VIDEO") \
-                else "saved,shares,reach,impressions"
+            # 'impressions' foi descontinuada (erro global desde a v22.0, mesmo
+            # pinando versões antigas). Métricas válidas variam por tipo de mídia.
+            metrics = "reach,saved,shares,total_interactions,ig_reels_avg_watch_time,views" \
+                if tipos.get(mid) in ("REELS", "REEL", "VIDEO") \
+                else "reach,saved,shares,profile_visits,follows,total_interactions"
             batch.append({"method": "GET", "relative_url": f"{mid}/insights?metric={metrics}"})
         r = requests.post(GRAPH_BASE, data={
             "access_token": token, "batch": json.dumps(batch), "include_headers": "false",
