@@ -29,16 +29,26 @@ O `.env` nunca é commitado (está no `.gitignore`).
 - **Instagram funciona bem via API** (alcance, salvamentos, compartilhamentos, visitas ao perfil,
   seguidores gerados, interações totais — e, para Reels, tempo médio assistido e visualizações).
   `impressions` foi descontinuada também no Instagram (erro global desde a v22.0) — não é buscada.
+- **Stories não têm histórico retroativo.** A API só expõe stories ainda ativos (até 24h após a
+  publicação) via `/{{ig-id}}/stories`. Não dá pra "puxar stories antigos" — só acumular ao longo do
+  tempo, rodando `fetch_meta_organic.py` periodicamente (ex.: diariamente, antes de cada story expirar).
+  O histórico acumulado fica em `data/meta_stories_history.json` (local, gitignored) e cresce a cada
+  execução; nada se perde entre execuções, mas nada anterior ao início da coleta pode ser recuperado.
 
 ## Rodar
 
 ```bash
 pip install -r requirements.txt
-python scripts/fetch_meta_organic.py
+python scripts/fetch_meta_organic.py   # posts (90d) + stories ativos (acumula histórico)
+python scripts/fetch_meta_ads_snapshot.py   # opcional: KPIs pagos (Meta Ads) via REPORTCLAUDE
+python scripts/gerar_dashboard.py
 ```
 
 Gera `data/meta_organic.json` com os posts orgânicos do Facebook e Instagram dos últimos
-`ORGANIC_LOOKBACK_DAYS` dias (padrão 90).
+`ORGANIC_LOOKBACK_DAYS` dias (padrão 90), e acumula `data/meta_stories_history.json` com os
+stories capturados a cada execução. Para o histórico de Stories crescer de verdade, agende essa
+execução para rodar pelo menos 1x por dia (ex.: GitHub Actions com `schedule`, como já existe no
+REPORTCLAUDE).
 
 ## Estrutura
 

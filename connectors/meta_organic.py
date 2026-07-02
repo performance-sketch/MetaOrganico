@@ -210,6 +210,41 @@ def fetch_instagram_posts(ig_id, token, days=90, with_insights=True):
     return resultado
 
 
+STORY_METRICS = "reach,replies,navigation,profile_visits,follows,total_interactions,link_clicks,shares,profile_activity"
+
+
+def fetch_instagram_stories(ig_id, token):
+    """Stories ATUALMENTE ativos do Instagram Business Account (com insights).
+
+    IMPORTANTE: a Graph API só expõe stories que ainda não expiraram (até 24h
+    após a publicação) via /{{ig-id}}/stories — não existe histórico retroativo.
+    Para ter uma série histórica é preciso rodar esta função periodicamente
+    (ex.: diariamente) e acumular os resultados (veja scripts/fetch_meta_organic.py).
+    'impressions' foi descontinuada; 'saved/likes/comments' não existem para stories.
+    """
+    fields = "id,media_type,media_product_type,media_url,thumbnail_url,timestamp,permalink"
+    stories, data = [], _get(f"{ig_id}/stories", token, {"fields": fields, "limit": 50})
+    stories.extend(data.get("data", []))
+    next_url = (data.get("paging") or {}).get("next")
+    while next_url:
+        data = requests.get(next_url, timeout=20).json()
+        stories.extend(data.get("data", []))
+        next_url = (data.get("paging") or {}).get("next")
+
+    for story in stories:
+        try:
+            ins = _get(f"{story['id']}/insights", token, {"metric": STORY_METRICS})
+            insights = {}
+            for item in ins.get("data", []):
+                vals = item.get("values") or [{}]
+                insights[item["name"]] = vals[0].get("value", 0)
+            story["insights"] = insights
+        except requests.RequestException:
+            story["insights"] = {}
+
+    return stories
+
+
 def fetch_all(days=None):
     """Ponto de entrada único: resolve página/IG e busca tudo (FB + IG orgânico)."""
     token = _require_token()
@@ -235,5 +270,9 @@ def fetch_all(days=None):
             resultado["instagram"] = fetch_instagram_posts(ig_id, token, days)
         except (requests.RequestException, MetaOrganicError) as e:
             resultado["instagram_error"] = str(e)
+        try:
+            resultado["instagram"]["stories_ativos"] = fetch_instagram_stories(ig_id, token)
+        except (requests.RequestException, MetaOrganicError) as e:
+            resultado["instagram_stories_error"] = str(e)
 
     return resultado
