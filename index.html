@@ -60,7 +60,7 @@
       <div class="text-sm" style="color:var(--sub)">Instagram @vertical.rio · 142.186 seguidores</div>
     </div>
     <div class="text-sm" style="color:var(--sub)">
-      <span style="color:var(--green)">●</span> Gerado em <strong style="color:var(--text)">08/07/2026 15:19</strong>
+      <span style="color:var(--green)">●</span> Gerado em <strong style="color:var(--text)">08/07/2026 15:38</strong>
     </div>
   </div>
 
@@ -105,13 +105,13 @@
 
   <div class="card mb-5">
     <div style="font-weight:600;font-size:.9rem;margin-bottom:4px">📈 Tendência de conta (Instagram)</div>
-    <div class="text-xs mb-4" style="color:var(--sub)">Série diária real por métrica de conta — não segue o calendário acima (a API não permite recorte por post nessas métricas). % compara os últimos 30 dias com os 30 dias anteriores.</div>
+    <div class="text-xs mb-4" style="color:var(--sub)">Série diária real por métrica de conta — <strong>segue o calendário acima</strong>. % compara o período selecionado com um período anterior de mesma duração.</div>
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       
       <div class="card">
         <div style="font-weight:600;font-size:.85rem;margin-bottom:6px">Visualizações</div>
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px">
-          <div class="kpi-val">11.921.186</div><span class="delta critical">▼ -22.0%</span>
+          <div class="kpi-val" id="trendval-visualizacoes">…</div><span class="delta" id="trenddelta-visualizacoes"></span>
         </div>
         <div style="position:relative;height:90px">
           <canvas id="trend-visualizacoes"></canvas>
@@ -120,7 +120,7 @@
       <div class="card">
         <div style="font-weight:600;font-size:.85rem;margin-bottom:6px">Alcance</div>
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px">
-          <div class="kpi-val">7.738.749</div><span class="delta critical">▼ -22.2%</span>
+          <div class="kpi-val" id="trendval-reach">…</div><span class="delta" id="trenddelta-reach"></span>
         </div>
         <div style="position:relative;height:90px">
           <canvas id="trend-reach"></canvas>
@@ -129,7 +129,7 @@
       <div class="card">
         <div style="font-weight:600;font-size:.85rem;margin-bottom:6px">Interações com o conteúdo</div>
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px">
-          <div class="kpi-val">451.960</div><span class="delta critical">▼ -45.9%</span>
+          <div class="kpi-val" id="trendval-interacoes">…</div><span class="delta" id="trenddelta-interacoes"></span>
         </div>
         <div style="position:relative;height:90px">
           <canvas id="trend-interacoes"></canvas>
@@ -138,7 +138,7 @@
       <div class="card">
         <div style="font-weight:600;font-size:.85rem;margin-bottom:6px">Cliques no link</div>
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px">
-          <div class="kpi-val">10.839</div><span class="delta critical">▼ -51.1%</span>
+          <div class="kpi-val" id="trendval-cliques_link">…</div><span class="delta" id="trenddelta-cliques_link"></span>
         </div>
         <div style="position:relative;height:90px">
           <canvas id="trend-cliques_link"></canvas>
@@ -147,16 +147,16 @@
       <div class="card">
         <div style="font-weight:600;font-size:.85rem;margin-bottom:6px">Visitas ao perfil</div>
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px">
-          <div class="kpi-val">158.508</div><span class="delta critical">▼ -59.0%</span>
+          <div class="kpi-val" id="trendval-visitas_perfil">…</div><span class="delta" id="trenddelta-visitas_perfil"></span>
         </div>
         <div style="position:relative;height:90px">
           <canvas id="trend-visitas_perfil"></canvas>
         </div>
       </div>
       <div class="card">
-        <div style="font-weight:600;font-size:.85rem;margin-bottom:6px">Seguidores</div>
+        <div style="font-weight:600;font-size:.85rem;margin-bottom:6px">Seguidores (variação no período)</div>
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px">
-          <div class="kpi-val">142.186</div>
+          <div class="kpi-val" id="trendval-seguidores">…</div><span class="delta" id="trenddelta-seguidores"></span>
         </div>
         <div style="position:relative;height:90px">
           <canvas id="trend-seguidores"></canvas>
@@ -728,6 +728,83 @@ function mudarAba(nome) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === nome));
 }
 
+const rotuloTendencia = {"visualizacoes": "Visualizações", "reach": "Alcance", "interacoes": "Interações com o conteúdo", "cliques_link": "Cliques no link", "visitas_perfil": "Visitas ao perfil", "seguidores": "Seguidores"};
+const fmtDataBR = iso => {
+  const [a, m, d] = iso.split('-');
+  return `${d}/${m}/${a}`;
+};
+
+const trendCharts = {};
+function diasEntre(de, ate) {
+  return Math.round((new Date(ate + 'T00:00:00') - new Date(de + 'T00:00:00')) / 86400000) + 1;
+}
+function somaSerieNoPeriodo(chave, de, ate) {
+  return Object.entries(CONTA_SERIES[chave] || {}).filter(([d]) => d >= de && d <= ate).reduce((s, [, v]) => s + v, 0);
+}
+
+function renderTendencias(de, ate) {
+  const n = diasEntre(de, ate);
+  const anteriorAte = new Date(de + 'T00:00:00'); anteriorAte.setDate(anteriorAte.getDate() - 1);
+  const anteriorDe = new Date(anteriorAte); anteriorDe.setDate(anteriorDe.getDate() - (n - 1));
+  const anteriorAteStr = anteriorAte.toISOString().slice(0, 10);
+  const anteriorDeStr = anteriorDe.toISOString().slice(0, 10);
+
+  Object.keys(CONTA_SERIES).forEach(chave => {
+    const el = document.getElementById('trend-' + chave);
+    if (!el) return;
+    const pontos = Object.entries(CONTA_SERIES[chave]).filter(([d]) => d >= de && d <= ate).sort((a, b) => a[0] < b[0] ? -1 : 1);
+
+    const total = pontos.reduce((s, [, v]) => s + v, 0);
+    const totalAnterior = somaSerieNoPeriodo(chave, anteriorDeStr, anteriorAteStr);
+    setText('trendval-' + chave, fN(total));
+    const deltaEl = document.getElementById('trenddelta-' + chave);
+    if (deltaEl) {
+      if (totalAnterior && pontos.length) {
+        const pct = Math.round((total - totalAnterior) / totalAnterior * 1000) / 10;
+        deltaEl.textContent = (pct >= 0 ? '▲ ' : '▼ ') + pct + '%';
+        deltaEl.className = 'delta ' + (pct >= 0 ? 'good' : 'critical');
+      } else {
+        deltaEl.textContent = '';
+        deltaEl.className = 'delta';
+      }
+    }
+
+    if (trendCharts[chave]) { trendCharts[chave].destroy(); delete trendCharts[chave]; }
+    if (!pontos.length) return;
+    trendCharts[chave] = new Chart(el, {
+      type: 'bar',
+      data: {
+        labels: pontos.map(p => p[0]),
+        datasets: [{
+          label: rotuloTendencia[chave] || chave,
+          data: pontos.map(p => p[1]),
+          backgroundColor: 'rgba(99,102,241,.55)', hoverBackgroundColor: '#6366f1',
+          borderRadius: 2, borderSkipped: false,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: true, position: 'top', align: 'end', labels: { color: '#94a3b8', boxWidth: 12, font: { size: 11 } } },
+          tooltip: {
+            backgroundColor: '#1e293b', borderColor: '#334155', borderWidth: 1,
+            titleColor: '#f1f5f9', bodyColor: '#f1f5f9', padding: 10, displayColors: false,
+            callbacks: {
+              title: items => fmtDataBR(items[0].label),
+              label: item => `${rotuloTendencia[chave] || chave}: ${fN(item.parsed.y)}`,
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { display: false }, grid: { display: false } },
+          y: { ticks: { color: '#94a3b8', maxTicksLimit: 4 }, grid: { color: 'rgba(51,65,85,.4)' } },
+        },
+      }
+    });
+  });
+}
+
 function aplicarFiltro() {
   const de = document.getElementById('filtro-de').value;
   const ate = document.getElementById('filtro-ate').value;
@@ -740,6 +817,7 @@ function aplicarFiltro() {
 
   setText('filtro-resumo', `${igRows.length + fbRows.length} posts no período (${igRows.length} IG · ${fbRows.length} FB)`);
   setText('periodo-texto', `${de} até ${ate}`);
+  renderTendencias(de, ate);
 
   // KPIs — Visão Geral
   setText('kpi-posts-ig', igRows.length);
@@ -947,48 +1025,6 @@ if (ADS) {
   });
 }
 
-const rotuloTendencia = {"visualizacoes": "Visualizações", "reach": "Alcance", "interacoes": "Interações com o conteúdo", "cliques_link": "Cliques no link", "visitas_perfil": "Visitas ao perfil", "seguidores": "Seguidores"};
-const fmtDataBR = iso => {
-  const [a, m, d] = iso.split('-');
-  return `${d}/${m}/${a}`;
-};
-
-Object.keys(CONTA_SERIES).forEach(chave => {
-  const el = document.getElementById('trend-' + chave);
-  if (!el) return;
-  const pontos = Object.entries(CONTA_SERIES[chave]).sort((a, b) => a[0] < b[0] ? -1 : 1);
-  new Chart(el, {
-    type: 'bar',
-    data: {
-      labels: pontos.map(p => p[0]),
-      datasets: [{
-        label: rotuloTendencia[chave] || chave,
-        data: pontos.map(p => p[1]),
-        backgroundColor: 'rgba(99,102,241,.55)', hoverBackgroundColor: '#6366f1',
-        borderRadius: 2, borderSkipped: false,
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { display: true, position: 'top', align: 'end', labels: { color: '#94a3b8', boxWidth: 12, font: { size: 11 } } },
-        tooltip: {
-          backgroundColor: '#1e293b', borderColor: '#334155', borderWidth: 1,
-          titleColor: '#f1f5f9', bodyColor: '#f1f5f9', padding: 10, displayColors: false,
-          callbacks: {
-            title: items => fmtDataBR(items[0].label),
-            label: item => `${rotuloTendencia[chave] || chave}: ${fN(item.parsed.y)}`,
-          }
-        }
-      },
-      scales: {
-        x: { ticks: { display: false }, grid: { display: false } },
-        y: { ticks: { color: '#94a3b8', maxTicksLimit: 4 }, grid: { color: 'rgba(51,65,85,.4)' } },
-      },
-    }
-  });
-});
 </script>
 </body>
 </html>

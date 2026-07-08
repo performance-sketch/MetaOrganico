@@ -59,6 +59,18 @@ stories capturados a cada execução. Para o histórico de Stories crescer de ve
 execução para rodar pelo menos 1x por dia (ex.: GitHub Actions com `schedule`, como já existe no
 REPORTCLAUDE).
 
+## Calendário dinâmico
+
+Há um seletor de período (datas + atalhos 7d/30d/90d/Tudo) no topo do dashboard. Ele recalcula em
+JS, na hora, praticamente tudo que tem data associada nas duas abas: KPIs, rankings, tabelas de
+posts, gráfico por formato, Stories, Collab, tema/produto/idioma/público-alvo, creators e os
+gráficos de Tendência de conta. **Só duas seções ficam de fora**, porque a própria API não dá
+dado com data para elas — não é limitação do dashboard:
+- **Demografia dos seguidores** (país/cidade/idade/gênero) — é uma foto dos seguidores agora, a
+  Graph API não guarda "demografia de 3 meses atrás".
+- **Meta Ads / Orgânico x Pago** — vem de um snapshot fixo de 30 dias raspado do REPORTCLAUDE, sem
+  série diária disponível.
+
 ## Aba "KPIs de Conteúdo"
 
 O dashboard tem duas abas: **Visão Geral** (a original, com todas as tabelas de posts) e
@@ -102,12 +114,16 @@ duas vezes.
   `instagram_manage_insights` (já listada acima). Se algum dos 4 breakdowns não vier, o dashboard
   mostra "não disponível" só naquele quadro, sem esconder os outros três.
 - **Tendência de conta (reach, seguidores, visualizações, visitas, cliques no link, interações)**
-  — **real**, na Visão Geral, replicando os cartões de linha do Meta Business Suite. Assim como a
-  demografia, é conta inteira e **não segue o calendário** do dashboard. Duas origens diferentes
-  por trás (testado contra a API real, v19.0):
+  — **real**, na Visão Geral, replicando os cartões de linha do Meta Business Suite. Ao contrário da
+  demografia, **essa aqui segue o calendário** do dashboard normalmente — tem data por ponto, então
+  o filtro de período recalcula soma e % igual às outras seções. "Seguidores" nesses gráficos é a
+  **variação líquida no período** (ganhos − perdas), não o total da conta (esse fica fixo no card
+  "Seguidores gerados (IG)" da Visão Geral, que soma por post, e no total atual mostrado no perfil).
+  Duas origens diferentes por trás (testado contra a API real, v19.0):
   - `reach` e `follower_count` (seguidores) aceitam `metric_type=time_series` — um ponto por dia,
     barato. **`follower_count` só responde para os últimos ~30 dias**, mesmo pedindo mais (limite
-    da própria Meta, não do código) — por isso o gráfico de Seguidores é mais curto que os outros.
+    da própria Meta, não do código) — por isso o gráfico de Seguidores é mais curto que os outros,
+    e datas fora dessa janela simplesmente não aparecem nele mesmo com um período maior selecionado.
   - `views`, `profile_views`, `visitas ao perfil`, `website_clicks` e `total_interactions` **só
     aceitam `metric_type=total_value`** (um número agregado, não série) — pra virar gráfico diário,
     o conector faz uma chamada por dia (em lotes de até 50 via endpoint de batch). Isso é caro, então

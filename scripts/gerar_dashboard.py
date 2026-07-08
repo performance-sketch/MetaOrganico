@@ -190,19 +190,14 @@ TREND_LABELS = {
 TREND_ORDER = ["visualizacoes", "reach", "interacoes", "cliques_link", "visitas_perfil", "seguidores"]
 
 
-def _soma_janela(serie, dias_inicio, dias_fim):
-    hoje = datetime.now().date()
-    ini = (hoje - timedelta(days=dias_fim)).isoformat()
-    fim = (hoje - timedelta(days=dias_inicio)).isoformat()
-    return sum(v for d, v in serie if ini <= d <= fim)
-
-
-def render_conta_series_section(series_conta, total_seguidores_atual):
+def render_conta_series_section(series_conta):
     """Tendência de conta (Instagram) — reach e seguidores vêm de time_series
     real (um ponto por dia); visualizações/visitas/cliques/interações vêm de
-    total_value chamado dia a dia (ver conector) — mesma origem, granularidade
-    diária de qualquer forma. É conta inteira, não segue o calendário do
-    dashboard (a API não permite recortar isso por post)."""
+    total_value chamado dia a dia (ver conector). Os números e o gráfico de
+    cada card são recalculados em JS a partir do calendário no topo — 'Seguidores'
+    aqui é a VARIAÇÃO líquida de seguidores no período (soma do follower_count
+    diário), não o total de seguidores da conta (esse fica no card fixo da
+    Visão Geral, que é sempre "agora")."""
     disponiveis = [chave for chave in TREND_ORDER if series_conta.get(chave)]
     if not disponiveis:
         return """
@@ -213,26 +208,12 @@ def render_conta_series_section(series_conta, total_seguidores_atual):
 
     cards = []
     for chave in disponiveis:
-        serie = series_conta[chave]
-        if chave == "seguidores":
-            valor_grande = fmt_int(total_seguidores_atual)
-            delta_html = ""
-        else:
-            atual    = _soma_janela(serie, 0, 29)
-            anterior = _soma_janela(serie, 30, 59)
-            valor_grande = fmt_int(sum(v for _, v in serie))
-            if anterior:
-                pct = round((atual - anterior) / anterior * 100, 1)
-                cor = "good" if pct >= 0 else "critical"
-                seta = "▲" if pct >= 0 else "▼"
-                delta_html = f'<span class="delta {cor}">{seta} {pct}%</span>'
-            else:
-                delta_html = ""
+        rotulo = "Seguidores (variação no período)" if chave == "seguidores" else TREND_LABELS[chave]
         cards.append(f"""
       <div class="card">
-        <div style="font-weight:600;font-size:.85rem;margin-bottom:6px">{TREND_LABELS[chave]}</div>
+        <div style="font-weight:600;font-size:.85rem;margin-bottom:6px">{rotulo}</div>
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px">
-          <div class="kpi-val">{valor_grande}</div>{delta_html}
+          <div class="kpi-val" id="trendval-{chave}">…</div><span class="delta" id="trenddelta-{chave}"></span>
         </div>
         <div style="position:relative;height:90px">
           <canvas id="trend-{chave}"></canvas>
@@ -245,7 +226,7 @@ def render_conta_series_section(series_conta, total_seguidores_atual):
     return f"""
   <div class="card mb-5">
     <div style="font-weight:600;font-size:.9rem;margin-bottom:4px">📈 Tendência de conta (Instagram)</div>
-    <div class="text-xs mb-4" style="color:var(--sub)">Série diária real por métrica de conta — não segue o calendário acima (a API não permite recorte por post nessas métricas). % compara os últimos 30 dias com os 30 dias anteriores.</div>
+    <div class="text-xs mb-4" style="color:var(--sub)">Série diária real por métrica de conta — <strong>segue o calendário acima</strong>. % compara o período selecionado com um período anterior de mesma duração.</div>
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       {"".join(cards)}
     </div>
@@ -368,7 +349,7 @@ def main():
 
     series_file = ROOT / "data" / "meta_account_timeseries.json"
     series_conta = load_json_or_empty(series_file)
-    conta_series_html = render_conta_series_section(series_conta, perfil.get("followers_count"))
+    conta_series_html = render_conta_series_section(series_conta)
     ig_media  = dados.get("instagram", {}).get("media", [])
     fb_posts  = dados.get("facebook_posts", [])
 
@@ -932,6 +913,83 @@ function mudarAba(nome) {{
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === nome));
 }}
 
+const rotuloTendencia = {trend_labels_json};
+const fmtDataBR = iso => {{
+  const [a, m, d] = iso.split('-');
+  return `${{d}}/${{m}}/${{a}}`;
+}};
+
+const trendCharts = {{}};
+function diasEntre(de, ate) {{
+  return Math.round((new Date(ate + 'T00:00:00') - new Date(de + 'T00:00:00')) / 86400000) + 1;
+}}
+function somaSerieNoPeriodo(chave, de, ate) {{
+  return Object.entries(CONTA_SERIES[chave] || {{}}).filter(([d]) => d >= de && d <= ate).reduce((s, [, v]) => s + v, 0);
+}}
+
+function renderTendencias(de, ate) {{
+  const n = diasEntre(de, ate);
+  const anteriorAte = new Date(de + 'T00:00:00'); anteriorAte.setDate(anteriorAte.getDate() - 1);
+  const anteriorDe = new Date(anteriorAte); anteriorDe.setDate(anteriorDe.getDate() - (n - 1));
+  const anteriorAteStr = anteriorAte.toISOString().slice(0, 10);
+  const anteriorDeStr = anteriorDe.toISOString().slice(0, 10);
+
+  Object.keys(CONTA_SERIES).forEach(chave => {{
+    const el = document.getElementById('trend-' + chave);
+    if (!el) return;
+    const pontos = Object.entries(CONTA_SERIES[chave]).filter(([d]) => d >= de && d <= ate).sort((a, b) => a[0] < b[0] ? -1 : 1);
+
+    const total = pontos.reduce((s, [, v]) => s + v, 0);
+    const totalAnterior = somaSerieNoPeriodo(chave, anteriorDeStr, anteriorAteStr);
+    setText('trendval-' + chave, fN(total));
+    const deltaEl = document.getElementById('trenddelta-' + chave);
+    if (deltaEl) {{
+      if (totalAnterior && pontos.length) {{
+        const pct = Math.round((total - totalAnterior) / totalAnterior * 1000) / 10;
+        deltaEl.textContent = (pct >= 0 ? '▲ ' : '▼ ') + pct + '%';
+        deltaEl.className = 'delta ' + (pct >= 0 ? 'good' : 'critical');
+      }} else {{
+        deltaEl.textContent = '';
+        deltaEl.className = 'delta';
+      }}
+    }}
+
+    if (trendCharts[chave]) {{ trendCharts[chave].destroy(); delete trendCharts[chave]; }}
+    if (!pontos.length) return;
+    trendCharts[chave] = new Chart(el, {{
+      type: 'bar',
+      data: {{
+        labels: pontos.map(p => p[0]),
+        datasets: [{{
+          label: rotuloTendencia[chave] || chave,
+          data: pontos.map(p => p[1]),
+          backgroundColor: 'rgba(99,102,241,.55)', hoverBackgroundColor: '#6366f1',
+          borderRadius: 2, borderSkipped: false,
+        }}]
+      }},
+      options: {{
+        responsive: true, maintainAspectRatio: false,
+        interaction: {{ mode: 'index', intersect: false }},
+        plugins: {{
+          legend: {{ display: true, position: 'top', align: 'end', labels: {{ color: '#94a3b8', boxWidth: 12, font: {{ size: 11 }} }} }},
+          tooltip: {{
+            backgroundColor: '#1e293b', borderColor: '#334155', borderWidth: 1,
+            titleColor: '#f1f5f9', bodyColor: '#f1f5f9', padding: 10, displayColors: false,
+            callbacks: {{
+              title: items => fmtDataBR(items[0].label),
+              label: item => `${{rotuloTendencia[chave] || chave}}: ${{fN(item.parsed.y)}}`,
+            }}
+          }}
+        }},
+        scales: {{
+          x: {{ ticks: {{ display: false }}, grid: {{ display: false }} }},
+          y: {{ ticks: {{ color: '#94a3b8', maxTicksLimit: 4 }}, grid: {{ color: 'rgba(51,65,85,.4)' }} }},
+        }},
+      }}
+    }});
+  }});
+}}
+
 function aplicarFiltro() {{
   const de = document.getElementById('filtro-de').value;
   const ate = document.getElementById('filtro-ate').value;
@@ -944,6 +1002,7 @@ function aplicarFiltro() {{
 
   setText('filtro-resumo', `${{igRows.length + fbRows.length}} posts no período (${{igRows.length}} IG · ${{fbRows.length}} FB)`);
   setText('periodo-texto', `${{de}} até ${{ate}}`);
+  renderTendencias(de, ate);
 
   // KPIs — Visão Geral
   setText('kpi-posts-ig', igRows.length);
@@ -1151,48 +1210,6 @@ if (ADS) {{
   }});
 }}
 
-const rotuloTendencia = {trend_labels_json};
-const fmtDataBR = iso => {{
-  const [a, m, d] = iso.split('-');
-  return `${{d}}/${{m}}/${{a}}`;
-}};
-
-Object.keys(CONTA_SERIES).forEach(chave => {{
-  const el = document.getElementById('trend-' + chave);
-  if (!el) return;
-  const pontos = Object.entries(CONTA_SERIES[chave]).sort((a, b) => a[0] < b[0] ? -1 : 1);
-  new Chart(el, {{
-    type: 'bar',
-    data: {{
-      labels: pontos.map(p => p[0]),
-      datasets: [{{
-        label: rotuloTendencia[chave] || chave,
-        data: pontos.map(p => p[1]),
-        backgroundColor: 'rgba(99,102,241,.55)', hoverBackgroundColor: '#6366f1',
-        borderRadius: 2, borderSkipped: false,
-      }}]
-    }},
-    options: {{
-      responsive: true, maintainAspectRatio: false,
-      interaction: {{ mode: 'index', intersect: false }},
-      plugins: {{
-        legend: {{ display: true, position: 'top', align: 'end', labels: {{ color: '#94a3b8', boxWidth: 12, font: {{ size: 11 }} }} }},
-        tooltip: {{
-          backgroundColor: '#1e293b', borderColor: '#334155', borderWidth: 1,
-          titleColor: '#f1f5f9', bodyColor: '#f1f5f9', padding: 10, displayColors: false,
-          callbacks: {{
-            title: items => fmtDataBR(items[0].label),
-            label: item => `${{rotuloTendencia[chave] || chave}}: ${{fN(item.parsed.y)}}`,
-          }}
-        }}
-      }},
-      scales: {{
-        x: {{ ticks: {{ display: false }}, grid: {{ display: false }} }},
-        y: {{ ticks: {{ color: '#94a3b8', maxTicksLimit: 4 }}, grid: {{ color: 'rgba(51,65,85,.4)' }} }},
-      }},
-    }}
-  }});
-}});
 </script>
 </body>
 </html>
