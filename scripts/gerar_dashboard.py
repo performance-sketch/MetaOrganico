@@ -417,6 +417,7 @@ def main():
     organico_30d_json    = safe(json.dumps(organico_30d, ensure_ascii=False))
     creators_manual_json = safe(json.dumps(creators_manual, ensure_ascii=False))
     conta_series_json    = safe(json.dumps({k: dict(v) for k, v in series_conta.items()}, ensure_ascii=False))
+    trend_labels_json    = safe(json.dumps(TREND_LABELS, ensure_ascii=False))
 
     if ads:
         ads_section_html = f"""
@@ -1150,23 +1151,41 @@ if (ADS) {{
   }});
 }}
 
+const rotuloTendencia = {trend_labels_json};
+const fmtDataBR = iso => {{
+  const [a, m, d] = iso.split('-');
+  return `${{d}}/${{m}}/${{a}}`;
+}};
+
 Object.keys(CONTA_SERIES).forEach(chave => {{
   const el = document.getElementById('trend-' + chave);
   if (!el) return;
   const pontos = Object.entries(CONTA_SERIES[chave]).sort((a, b) => a[0] < b[0] ? -1 : 1);
   new Chart(el, {{
-    type: 'line',
+    type: 'bar',
     data: {{
       labels: pontos.map(p => p[0]),
       datasets: [{{
+        label: rotuloTendencia[chave] || chave,
         data: pontos.map(p => p[1]),
-        borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,.12)',
-        fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2,
+        backgroundColor: 'rgba(99,102,241,.55)', hoverBackgroundColor: '#6366f1',
+        borderRadius: 2, borderSkipped: false,
       }}]
     }},
     options: {{
       responsive: true, maintainAspectRatio: false,
-      plugins: {{ legend: {{ display: false }}, tooltip: {{ callbacks: {{ title: items => items[0].label }} }} }},
+      interaction: {{ mode: 'index', intersect: false }},
+      plugins: {{
+        legend: {{ display: true, position: 'top', align: 'end', labels: {{ color: '#94a3b8', boxWidth: 12, font: {{ size: 11 }} }} }},
+        tooltip: {{
+          backgroundColor: '#1e293b', borderColor: '#334155', borderWidth: 1,
+          titleColor: '#f1f5f9', bodyColor: '#f1f5f9', padding: 10, displayColors: false,
+          callbacks: {{
+            title: items => fmtDataBR(items[0].label),
+            label: item => `${{rotuloTendencia[chave] || chave}}: ${{fN(item.parsed.y)}}`,
+          }}
+        }}
+      }},
       scales: {{
         x: {{ ticks: {{ display: false }}, grid: {{ display: false }} }},
         y: {{ ticks: {{ color: '#94a3b8', maxTicksLimit: 4 }}, grid: {{ color: 'rgba(51,65,85,.4)' }} }},
