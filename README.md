@@ -59,6 +59,87 @@ stories capturados a cada execução. Para o histórico de Stories crescer de ve
 execução para rodar pelo menos 1x por dia (ex.: GitHub Actions com `schedule`, como já existe no
 REPORTCLAUDE).
 
+## Aba "KPIs de Conteúdo"
+
+O dashboard tem duas abas: **Visão Geral** (a original, com todas as tabelas de posts) e
+**KPIs de Conteúdo** — um recorte estratégico com alcance/descoberta, engajamento (com taxas
+derivadas e um Índice de Intenção que pesa mais salvamentos/compartilhamentos/cliques do que
+curtidas), quebra por tema/produto/idioma, e performance real de creators a partir dos posts
+em Collab. As duas abas leem o **mesmo** `data/meta_organic.json` — nada é buscado ou calculado
+duas vezes.
+
+**O que é dado real da API, e o que não é:**
+
+- Alcance, interações, salvos, compartilhamentos, visitas ao perfil, seguidores por post,
+  visualizações de vídeo e tempo médio assistido (Reels) — **reais**, vêm da Graph API.
+- Impressões, retenção completa (% de conclusão de vídeo), alcance não-seguidor e cliques no
+  link da bio por post — **não existem** na Graph API atual (aparecem como "—" no dashboard).
+- Taxa de engajamento/salvamento/compartilhamento e o Índice de Intenção
+  (`salvos×3 + compart.×3 + cliques_perfil×2 + comentários×1 + curtidas×0,5`) — **calculados**
+  a partir dos números reais acima; a fórmula do índice está exposta na própria tela.
+- **Tema** e **produto citado** — classificados **automaticamente por palavra-chave na
+  legenda** (ver `TEMA_KEYWORDS`/`PRODUTO_KEYWORDS` em `scripts/gerar_dashboard.py`). É uma
+  heurística simples e pode errar (ex.: um post que menciona "Cristo" de passagem entra como
+  tema "Cristo Redentor" mesmo se não for o assunto principal).
+- **Idioma** — detectado por contagem de palavras comuns de PT/EN/ES na legenda; heurística,
+  não é 100% confiável para legendas curtas ou mistas.
+- **Gancho inicial, público provável, objetivo e CTA** — **não têm heurística automática**
+  (são subjetivos demais para inferir de forma confiável). Ficam "Não classificado" até
+  alguém preencher manualmente.
+- **Creators**: alcance/interações/salvos/etc. por creator são **reais**, somados a partir dos
+  posts com `collaborators` preenchido. **Custo, receita e ROI não existem em nenhuma API da
+  Meta** — vêm de contrato e do Rezdy, fora do escopo deste conector.
+
+### Curadoria manual (`data/content_tags.json` e `data/creators.json`)
+
+Esses dois arquivos são versionados (exceção no `.gitignore`) porque guardam conhecimento de
+negócio que nenhuma API tem. Comece vazios (`{}`) e preencha aos poucos:
+
+```jsonc
+// data/content_tags.json — chave = id do post (campo "id" em IG_ROWS/ig-body).
+// Qualquer campo aqui tem prioridade sobre a classificação automática.
+{
+  "17912345678901234": {
+    "tema": "Cristo Redentor",
+    "produto": "Doors Off",
+    "idioma": "Português",
+    "gancho": "Vista aérea",
+    "publico": "Turista premium",
+    "objetivo": "Desejo",
+    "cta": "Link na bio"
+  }
+}
+```
+
+```jsonc
+// data/creators.json — chave = username do Instagram (sem @, igual aparece no badge Collab).
+{
+  "parceiro_oficial": {
+    "custo": 3000,
+    "leads_whatsapp": 12,
+    "reservas": 4,
+    "receita": 14000
+  }
+}
+```
+
+### Backfill de histórico
+
+Por padrão cada execução busca só os últimos `ORGANIC_LOOKBACK_DAYS` dias (90), mas
+`fetch_meta_organic.py` **funde por id** com o que já existe em `data/meta_organic.json` — o
+histórico só cresce, nunca é substituído. Para trazer tudo desde uma data específica pela
+primeira vez (ex.: 01/01/2025), rode uma vez com uma janela maior:
+
+```bash
+ORGANIC_LOOKBACK_DAYS=600 python scripts/fetch_meta_organic.py
+python scripts/gerar_dashboard.py
+```
+
+As execuções diárias seguintes podem voltar a usar o padrão de 90 dias — a fusão por id
+preserva o que já foi trazido no backfill. **Stories são a exceção**: a API não expõe
+histórico retroativo, então nada anterior ao início da coleta pode ser recuperado, não importa
+o valor de `ORGANIC_LOOKBACK_DAYS`.
+
 ## Estrutura
 
 ```

@@ -11,7 +11,75 @@ ROOT          = pathlib.Path(__file__).parent.parent
 DATA_FILE     = ROOT / "data" / "meta_organic.json"
 ADS_FILE      = ROOT / "data" / "meta_ads_snapshot.json"
 STORIES_FILE  = ROOT / "data" / "meta_stories_history.json"
+TAGS_FILE     = ROOT / "data" / "content_tags.json"
+CREATORS_FILE = ROOT / "data" / "creators.json"
 INDEX_FILE    = ROOT / "index.html"
+
+# Classificação automática por palavras-chave na legenda — é uma heurística
+# simples, não uma leitura de intenção real do post. Serve para dar um ponto
+# de partida em "por tipo de conteúdo"; pode e deve ser corrigida manualmente
+# via data/content_tags.json (id do post -> {tema, produto, idioma, gancho,
+# publico, objetivo, cta}), que sempre tem prioridade sobre a heurística.
+TEMA_KEYWORDS = [
+    ("Cristo Redentor", ["cristo", "redeemer", "corcovado"]),
+    ("Pão de Açúcar", ["pão de açúcar", "pao de acucar", "sugarloaf"]),
+    ("Praias", ["praia", "beach", "ipanema", "copacabana", "leblon"]),
+    ("Bastidores", ["bastidor", "behind the scenes", "backstage", "making of"]),
+    ("Segurança", ["segurança", "seguranca", "safety", "manutenção"]),
+    ("Luxo", ["luxo", "luxury", " vip ", "exclusiv"]),
+]
+PRODUTO_KEYWORDS = [
+    ("Doors Off", ["doors off", "doors-off", "doorsoff", "portas abertas"]),
+    ("Doors On", ["doors on", "doors-on", "doorson"]),
+    ("45 min", ["45 min", "45min", "45 minutos"]),
+    ("30 min", ["30 min", "30min", "30 minutos"]),
+    ("Gift Card", ["gift card", "giftcard"]),
+]
+IDIOMA_MARCADORES = [
+    ("Português", ["você", "voo", "não", "reserva", "experiência"]),
+    ("Español", ["vuelo", "reserva", "experiencia", " tú ", "increíble"]),
+    ("English", [" the ", " you ", " book ", " flight ", " experience "]),
+]
+
+
+def _match_keywords(texto, tabela):
+    t = f" {(texto or '').lower()} "
+    for rotulo, palavras in tabela:
+        if any(p in t for p in palavras):
+            return rotulo
+    return None
+
+
+def detectar_idioma(legenda):
+    t = f" {(legenda or '').lower()} "
+    pontos = {rotulo: sum(1 for m in marcadores if m in t) for rotulo, marcadores in IDIOMA_MARCADORES}
+    rotulo, melhor = max(pontos.items(), key=lambda kv: kv[1])
+    return rotulo if melhor > 0 else "Não identificado"
+
+
+def load_json_or_empty(path):
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+    return {}
+
+
+def classificar_post(post_id, legenda, tem_collab, tags_manuais):
+    """Tags manuais (data/content_tags.json) sempre vencem a heurística automática."""
+    manual = tags_manuais.get(post_id, {})
+    tema = manual.get("tema") or _match_keywords(legenda, TEMA_KEYWORDS) or ("Creators" if tem_collab else "Não classificado")
+    return {
+        "tema": tema,
+        "produto": manual.get("produto") or _match_keywords(legenda, PRODUTO_KEYWORDS) or "Não identificado",
+        "idioma": manual.get("idioma") or detectar_idioma(legenda),
+        "gancho": manual.get("gancho") or "Não classificado",
+        "publico": manual.get("publico") or "Não classificado",
+        "objetivo": manual.get("objetivo") or "Não classificado",
+        "cta": manual.get("cta") or "Não classificado",
+        "classificado_manualmente": bool(manual),
+    }
 
 
 def fmt_int(n):
@@ -31,29 +99,56 @@ def media_format(post):
     return t.title() or "?"
 
 
-def build_ig_rows(media):
+def _pct(numerador, denominador):
+    if numerador is None or not denominador:
+        return None
+    return round(numerador / denominador * 100, 2)
+
+
+def build_ig_rows(media, tags_manuais):
     rows = []
     for p in media:
         ins = p.get("insights", {}) or {}
-        rows.append({
+        legenda_completa = p.get("caption") or ""
+        colaboradores = p.get("collaborators") or []
+        alcance = ins.get("reach")
+        salvos = ins.get("saved")
+        compart = ins.get("shares")
+        interacoes = ins.get("total_interactions")
+        visitas = ins.get("profile_visits")
+        curtidas = p.get("like_count", 0) or 0
+        comentarios = p.get("comments_count", 0) or 0
+
+        partes_intencao = [v for v in (salvos, compart, visitas, comentarios, curtidas) if v is not None]
+        indice_intencao = round(
+            (salvos or 0) * 3 + (compart or 0) * 3 + (visitas or 0) * 2 + (comentarios or 0) * 1 + (curtidas or 0) * 0.5, 1
+        ) if partes_intencao else None
+
+        row = {
             "id": p.get("id", ""),
             "data": (p.get("timestamp") or "")[:10],
             "formato": media_format(p),
-            "legenda": (p.get("caption") or "")[:140],
+            "legenda": legenda_completa[:140],
             "link": p.get("permalink", ""),
             "thumb": p.get("thumbnail_url") or p.get("media_url") or "",
-            "colaboradores": p.get("collaborators") or [],
-            "curtidas": p.get("like_count", 0) or 0,
-            "comentarios": p.get("comments_count", 0) or 0,
-            "alcance": ins.get("reach"),
-            "salvos": ins.get("saved"),
-            "compartilhamentos": ins.get("shares"),
-            "visitas_perfil": ins.get("profile_visits"),
+            "colaboradores": colaboradores,
+            "curtidas": curtidas,
+            "comentarios": comentarios,
+            "alcance": alcance,
+            "salvos": salvos,
+            "compartilhamentos": compart,
+            "visitas_perfil": visitas,
             "seguidores": ins.get("follows"),
-            "interacoes": ins.get("total_interactions"),
+            "interacoes": interacoes,
             "visualizacoes": ins.get("views"),
             "tempo_medio_assistido": ins.get("ig_reels_avg_watch_time"),
-        })
+            "taxa_engajamento": _pct(interacoes, alcance),
+            "taxa_salvamento": _pct(salvos, alcance),
+            "taxa_compartilhamento": _pct(compart, alcance),
+            "indice_intencao": indice_intencao,
+        }
+        row.update(classificar_post(row["id"], legenda_completa, bool(colaboradores), tags_manuais))
+        rows.append(row)
     return rows
 
 
@@ -132,19 +227,108 @@ def top_n(rows, campo, n=10):
     return sorted(validos, key=lambda r: r[campo], reverse=True)[:n]
 
 
+def agg_by_dimensao(ig_rows, campo):
+    """Agrupa posts por uma dimensão de conteúdo (tema, produto ou idioma)."""
+    grupos = {}
+    for r in ig_rows:
+        chave = r.get(campo) or "Não classificado"
+        g = grupos.setdefault(chave, {"valor": chave, "n": 0, "alcance": [], "interacoes": [], "indice_intencao": []})
+        g["n"] += 1
+        for campo_origem, campo_grupo in (("alcance", "alcance"), ("interacoes", "interacoes"), ("indice_intencao", "indice_intencao")):
+            v = r.get(campo_origem)
+            if v is not None:
+                g[campo_grupo].append(v)
+
+    def media(lst):
+        return round(sum(lst) / len(lst), 1) if lst else None
+
+    resultado = []
+    for g in grupos.values():
+        resultado.append({
+            "valor": g["valor"], "n": g["n"],
+            "alcance_total": sum(g["alcance"]),
+            "alcance_medio": media(g["alcance"]),
+            "interacoes_media": media(g["interacoes"]),
+            "indice_intencao_medio": media(g["indice_intencao"]),
+        })
+    resultado.sort(key=lambda x: x["alcance_total"], reverse=True)
+    return resultado
+
+
+def build_creator_rows(ig_rows, creators_manual):
+    """Performance orgânica real por creator, a partir dos posts marcados como
+    Collab. Custo/receita/ROI são manuais (data/creators.json) — a Graph API
+    não tem esse dado, ele vive em contrato + Rezdy."""
+    por_creator = {}
+    for r in ig_rows:
+        for username in r["colaboradores"]:
+            c = por_creator.setdefault(username, {
+                "username": username, "n_posts": 0, "alcance": 0, "interacoes": 0,
+                "salvos": 0, "compartilhamentos": 0, "visitas_perfil": 0, "seguidores": 0,
+            })
+            c["n_posts"] += 1
+            for campo in ("alcance", "interacoes", "salvos", "compartilhamentos", "visitas_perfil", "seguidores"):
+                v = r.get(campo)
+                if v is not None:
+                    c[campo] += v
+
+    resultado = []
+    for username, c in por_creator.items():
+        manual = creators_manual.get(username, {})
+        custo, receita = manual.get("custo"), manual.get("receita")
+        resultado.append({
+            **c,
+            "custo": custo,
+            "leads_whatsapp": manual.get("leads_whatsapp"),
+            "reservas": manual.get("reservas"),
+            "receita": receita,
+            "roi": round(receita / custo, 2) if custo and receita else None,
+        })
+    resultado.sort(key=lambda c: c["alcance"], reverse=True)
+    return resultado
+
+
 def main():
     dados = json.loads(DATA_FILE.read_text(encoding="utf-8"))
     perfil    = dados.get("instagram", {}).get("perfil", {})
     ig_media  = dados.get("instagram", {}).get("media", [])
     fb_posts  = dados.get("facebook_posts", [])
 
-    ig_rows = build_ig_rows(ig_media)
+    tags_manuais    = load_json_or_empty(TAGS_FILE)
+    creators_manual = load_json_or_empty(CREATORS_FILE)
+
+    ig_rows = build_ig_rows(ig_media, tags_manuais)
     fb_rows = build_fb_rows(fb_posts)
 
     total_alcance    = sum(r["alcance"] for r in ig_rows if r["alcance"] is not None)
     total_interacoes = sum(r["interacoes"] for r in ig_rows if r["interacoes"] is not None)
     total_visitas    = sum(r["visitas_perfil"] for r in ig_rows if r["visitas_perfil"] is not None)
     total_seguidores = sum(r["seguidores"] for r in ig_rows if r["seguidores"] is not None)
+    total_video_views = sum(r["visualizacoes"] for r in ig_rows if r["visualizacoes"] is not None)
+    total_curtidas    = sum(r["curtidas"] for r in ig_rows if r["curtidas"] is not None)
+    total_comentarios = sum(r["comentarios"] for r in ig_rows if r["comentarios"] is not None)
+    total_salvos      = sum(r["salvos"] for r in ig_rows if r["salvos"] is not None)
+    total_compart_ig  = sum(r["compartilhamentos"] for r in ig_rows if r["compartilhamentos"] is not None)
+
+    def media_campo(campo):
+        vals = [r[campo] for r in ig_rows if r.get(campo) is not None]
+        return round(sum(vals) / len(vals), 2) if vals else None
+
+    taxas_medias = {
+        "engajamento": media_campo("taxa_engajamento"),
+        "salvamento": media_campo("taxa_salvamento"),
+        "compartilhamento": media_campo("taxa_compartilhamento"),
+    }
+    ranking_intencao = top_n(ig_rows, "indice_intencao", 10)
+
+    por_tema    = agg_by_dimensao(ig_rows, "tema")
+    por_produto = agg_by_dimensao(ig_rows, "produto")
+    por_idioma  = agg_by_dimensao(ig_rows, "idioma")
+    creator_rows = build_creator_rows(ig_rows, creators_manual)
+
+    datas_cobertas = [r["data"] for r in ig_rows if r["data"]] + [r["data"] for r in fb_rows if r["data"]]
+    periodo_inicio = min(datas_cobertas) if datas_cobertas else "—"
+    periodo_fim    = max(datas_cobertas) if datas_cobertas else "—"
 
     por_formato = agg_by_format(ig_rows)
     collab_rows = [r for r in ig_rows if r["colaboradores"]]
@@ -210,6 +394,7 @@ def main():
     story_rows_json    = json.dumps(story_rows, ensure_ascii=False)
     stories_totais_json = json.dumps(stories_totais, ensure_ascii=False)
     story_rankings_json = json.dumps(story_rankings, ensure_ascii=False)
+    ranking_intencao_json = json.dumps(ranking_intencao, ensure_ascii=False)
 
     def safe(s):
         """Evita que uma legenda contendo '</script' feche a tag prematuramente."""
@@ -225,6 +410,7 @@ def main():
     story_rows_json      = safe(story_rows_json)
     stories_totais_json  = safe(stories_totais_json)
     story_rankings_json  = safe(story_rankings_json)
+    ranking_intencao_json = safe(ranking_intencao_json)
 
     if ads:
         ads_section_html = f"""
@@ -326,6 +512,111 @@ def main():
   </div>
 """
 
+    def linha_dimensao(r):
+        return f"""<tr>
+          <td>{r['valor']}</td><td style="text-align:right">{r['n']}</td>
+          <td style="text-align:right">{fmt_int(r['alcance_total'])}</td>
+          <td style="text-align:right">{fmt_int(r['alcance_medio'])}</td>
+          <td style="text-align:right">{fmt_int(r['interacoes_media'])}</td>
+          <td style="text-align:right">{fmt_int(r['indice_intencao_medio'])}</td>
+        </tr>"""
+
+    def tabela_dimensao(titulo, linhas):
+        corpo = "".join(linha_dimensao(r) for r in linhas) or '<tr><td colspan="6" style="color:var(--sub)">Sem dados</td></tr>'
+        return f"""
+      <div>
+        <div style="font-weight:600;font-size:.82rem;margin-bottom:10px;color:var(--sub)">{titulo}</div>
+        <div style="overflow-x:auto">
+          <table>
+            <thead><tr>
+              <th>Valor</th><th style="text-align:right">Posts</th><th style="text-align:right">Alcance total</th>
+              <th style="text-align:right">Alcance médio</th><th style="text-align:right">Interações médias</th>
+              <th style="text-align:right">Índice intenção médio</th>
+            </tr></thead>
+            <tbody>{corpo}</tbody>
+          </table>
+        </div>
+      </div>"""
+
+    if creator_rows:
+        linhas_creator = "".join(f"""<tr>
+          <td>@{c['username']}</td><td style="text-align:right">{c['n_posts']}</td>
+          <td style="text-align:right">{fmt_int(c['alcance'])}</td><td style="text-align:right">{fmt_int(c['interacoes'])}</td>
+          <td style="text-align:right">{fmt_int(c['salvos'])}</td><td style="text-align:right">{fmt_int(c['compartilhamentos'])}</td>
+          <td style="text-align:right">{fmt_int(c['visitas_perfil'])}</td><td style="text-align:right">{fmt_int(c['seguidores'])}</td>
+          <td style="text-align:right">{f"R$ {c['custo']:,.0f}" if c['custo'] else '—'}</td>
+          <td style="text-align:right">{f"R$ {c['receita']:,.0f}" if c['receita'] else '—'}</td>
+          <td style="text-align:right">{f"{c['roi']}x" if c['roi'] else '—'}</td>
+        </tr>""" for c in creator_rows)
+        creators_table_html = f"""
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>Creator</th><th style="text-align:right">Posts</th><th style="text-align:right">Alcance</th>
+          <th style="text-align:right">Interações</th><th style="text-align:right">Salvos</th>
+          <th style="text-align:right">Compart.</th><th style="text-align:right">Visitas perfil</th>
+          <th style="text-align:right">Seguidores</th><th style="text-align:right">Custo</th>
+          <th style="text-align:right">Receita</th><th style="text-align:right">ROI</th>
+        </tr></thead>
+        <tbody>{linhas_creator}</tbody>
+      </table>
+    </div>
+    <div class="text-xs mt-3" style="color:var(--sub)">Alcance/interações/salvos etc. são reais, somados a partir dos posts marcados como Collab. Custo, receita e ROI não existem na API da Meta — preencha manualmente em <code>data/creators.json</code> (chave = username do Instagram) para aparecerem aqui.</div>"""
+    else:
+        creators_table_html = """
+    <div class="text-sm" style="color:var(--sub)">Nenhum creator com posts em Collab detectado ainda. Assim que houver publicações com <code>collaborators</code> preenchido, a performance orgânica real deles aparece aqui automaticamente.</div>"""
+
+    conteudo_tab_html = f"""
+  <div class="card mb-5" style="border-color:var(--cyan);background:rgba(6,182,212,.06)">
+    <div class="text-sm">🧭 <strong>Período coberto: {periodo_inicio} até {periodo_fim}</strong> (posts de Facebook + Instagram — Stories não entram, a API não permite histórico retroativo). Alguns KPIs abaixo não existem na Graph API atual (impressões, retenção completa de vídeo, alcance não-seguidor, cliques no link da bio) — aparecem como "—". Tema/produto/idioma são <strong>classificados automaticamente por palavra-chave na legenda</strong> (heurística, pode errar); gancho inicial, público provável, objetivo e CTA exigem tagueamento manual em <code>data/content_tags.json</code> (ainda vazio).</div>
+  </div>
+
+  <div class="card mb-5">
+    <div style="font-weight:600;font-size:.9rem;margin-bottom:16px">🔭 Alcance e descoberta</div>
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div><div class="kpi-label">Alcance (IG)</div><div class="kpi-val">{fmt_int(total_alcance)}</div></div>
+      <div><div class="kpi-label">Impressões</div><div class="kpi-val" style="color:var(--sub)">—</div><div class="text-xs" style="color:var(--sub)">descontinuado pela API</div></div>
+      <div><div class="kpi-label">Visualizações de vídeo</div><div class="kpi-val">{fmt_int(total_video_views)}</div></div>
+      <div><div class="kpi-label">Retenção média (Reels)</div><div class="kpi-val">{fmt_int(media_campo('tempo_medio_assistido'))}<span style="font-size:.9rem">s</span></div><div class="text-xs" style="color:var(--sub)">tempo médio assistido, não é % de conclusão</div></div>
+      <div><div class="kpi-label">Novos seguidores (por post)</div><div class="kpi-val">{fmt_int(total_seguidores)}</div></div>
+      <div><div class="kpi-label">Alcance não-seguidor</div><div class="kpi-val" style="color:var(--sub)">—</div><div class="text-xs" style="color:var(--sub)">não exposto pela API</div></div>
+    </div>
+  </div>
+
+  <div class="card mb-5">
+    <div style="font-weight:600;font-size:.9rem;margin-bottom:4px">❤️ Engajamento</div>
+    <div class="text-xs mb-4" style="color:var(--sub)">Para a Vertical Rio, salvamentos, compartilhamentos e cliques pesam mais que curtidas — indicam desejo/intenção, não só aprovação passiva.</div>
+    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 mb-4">
+      <div><div class="kpi-label">Curtidas</div><div class="kpi-val">{fmt_int(total_curtidas)}</div></div>
+      <div><div class="kpi-label">Comentários</div><div class="kpi-val">{fmt_int(total_comentarios)}</div></div>
+      <div><div class="kpi-label">Compartilhamentos</div><div class="kpi-val">{fmt_int(total_compart_ig)}</div></div>
+      <div><div class="kpi-label">Salvamentos</div><div class="kpi-val">{fmt_int(total_salvos)}</div></div>
+      <div><div class="kpi-label">Respostas em Stories</div><div class="kpi-val">{fmt_int(stories_totais.get('respostas'))}</div></div>
+      <div><div class="kpi-label">Cliques no perfil</div><div class="kpi-val">{fmt_int(total_visitas)}</div></div>
+      <div><div class="kpi-label">Cliques no link da bio</div><div class="kpi-val" style="color:var(--sub)">—</div><div class="text-xs" style="color:var(--sub)">só agregado por conta, não por post</div></div>
+      <div><div class="kpi-label">Taxa de engajamento média</div><div class="kpi-val">{taxas_medias['engajamento'] if taxas_medias['engajamento'] is not None else '—'}%</div></div>
+      <div><div class="kpi-label">Taxa de salvamento média</div><div class="kpi-val">{taxas_medias['salvamento'] if taxas_medias['salvamento'] is not None else '—'}%</div></div>
+      <div><div class="kpi-label">Taxa de compartilhamento média</div><div class="kpi-val">{taxas_medias['compartilhamento'] if taxas_medias['compartilhamento'] is not None else '—'}%</div></div>
+    </div>
+    <div style="font-weight:600;font-size:.82rem;margin-bottom:10px;color:var(--sub)">🏆 Top 10 — Índice de Intenção <span style="text-transform:none;font-weight:400">(salvos×3 + compart.×3 + cliques perfil×2 + comentários×1 + curtidas×0,5)</span></div>
+    <div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Formato</th><th>Legenda</th><th style="text-align:right">Índice</th></tr></thead><tbody id="rank-intencao"></tbody></table></div>
+  </div>
+
+  <div class="card mb-5">
+    <div style="font-weight:600;font-size:.9rem;margin-bottom:16px">🗂️ Por tipo de conteúdo</div>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {tabela_dimensao("Por tema", por_tema)}
+      {tabela_dimensao("Por produto citado", por_produto)}
+      {tabela_dimensao("Por idioma", por_idioma)}
+    </div>
+  </div>
+
+  <div class="card mb-5">
+    <div style="font-weight:600;font-size:.9rem;margin-bottom:4px">🤝 Creators — performance orgânica</div>
+    {creators_table_html}
+  </div>
+"""
+
     html = f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -368,6 +659,10 @@ def main():
   .thumb-cell {{ width:44px; height:44px; border-radius:6px; object-fit:cover; display:block; background:var(--surface2); }}
   .thumb-cell.empty {{ display:flex; align-items:center; justify-content:center; color:var(--sub); font-size:.6rem; }}
   .badge-collab {{ background:rgba(34,197,94,.15); color:#4ade80; }}
+  .tabs {{ display:flex; gap:8px; }}
+  .tab-btn {{ background:var(--surface); border:1px solid var(--border); color:var(--sub); padding:9px 18px; border-radius:9px; font-size:.82rem; font-weight:600; cursor:pointer; }}
+  .tab-btn.active {{ background:var(--indigo); color:#fff; border-color:var(--indigo); }}
+  .mt-3 {{ margin-top:12px; }}
 </style>
 </head>
 <body class="p-4 md:p-8 max-w-[1400px] mx-auto">
@@ -382,6 +677,12 @@ def main():
     </div>
   </div>
 
+  <div class="tabs mb-5">
+    <button class="tab-btn active" data-tab="geral" onclick="mudarAba('geral')">📊 Visão Geral</button>
+    <button class="tab-btn" data-tab="conteudo" onclick="mudarAba('conteudo')">🧭 KPIs de Conteúdo</button>
+  </div>
+
+  <div id="tab-geral">
   <div class="card mb-5" style="border-color:var(--amber);background:rgba(245,158,11,.06)">
     <div class="text-sm">⚠️ <strong>Facebook</strong>: a Graph API descontinuou alcance/impressões por post globalmente — esses campos não existem mais via API (só no export manual do Meta Business Suite). Curtidas/comentários/compartilhamentos do Facebook dependem da permissão <code>pages_read_user_content</code> no token. <strong>Instagram</strong> tem dados completos abaixo.</div>
   </div>
@@ -471,6 +772,11 @@ def main():
       </table>
     </div>
   </div>
+  </div><!-- /tab-geral -->
+
+  <div id="tab-conteudo" style="display:none">
+{conteudo_tab_html}
+  </div><!-- /tab-conteudo -->
 
 <script>
 const IG_ROWS     = {ig_rows_json};
@@ -481,6 +787,7 @@ const ADS           = {ads_json};
 const ORGANICO_30D  = {organico_30d_json};
 const STORY_ROWS     = {story_rows_json};
 const STORIES_RANKINGS = {story_rankings_json};
+const RANKING_INTENCAO = {ranking_intencao_json};
 
 const fN = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('pt-BR');
 const trunc = (s, n) => (s || '').length > n ? s.slice(0, n) + '…' : (s || '—');
@@ -511,6 +818,13 @@ preencherTabela('rank-alcance',      RANKINGS.alcance,      rankRow('alcance'));
 preencherTabela('rank-interacoes',   RANKINGS.interacoes,   rankRow('interacoes'));
 preencherTabela('rank-visitas',      RANKINGS.visitas_perfil, rankRow('visitas_perfil'));
 preencherTabela('rank-salvos',       RANKINGS.salvos,       rankRow('salvos'));
+preencherTabela('rank-intencao',     RANKING_INTENCAO,      rankRow('indice_intencao'));
+
+function mudarAba(nome) {{
+  document.getElementById('tab-geral').style.display = nome === 'geral' ? '' : 'none';
+  document.getElementById('tab-conteudo').style.display = nome === 'conteudo' ? '' : 'none';
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === nome));
+}}
 
 const rotuloMetrica = {{ alcance:'Alcance', interacoes:'Interações', visitas_perfil:'Visitas ao perfil', salvos:'Salvos' }};
 function renderTop3(id, rows, campo, n) {{
