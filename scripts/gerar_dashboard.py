@@ -234,7 +234,9 @@ def render_conta_series_section(series_conta, total_seguidores_atual):
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px">
           <div class="kpi-val">{valor_grande}</div>{delta_html}
         </div>
-        <canvas id="trend-{chave}" height="70"></canvas>
+        <div style="position:relative;height:90px">
+          <canvas id="trend-{chave}"></canvas>
+        </div>
       </div>""")
 
     faltando = [TREND_LABELS[c] for c in TREND_ORDER if c not in disponiveis]
