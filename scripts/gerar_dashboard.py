@@ -255,6 +255,18 @@ def agg_by_dimensao(ig_rows, campo):
     return resultado
 
 
+def build_creator_posts_map(ig_rows):
+    """username -> posts (com thumb/link) daquele creator, do mais para o menos alcance —
+    usado para abrir/ver o criativo real por trás dos números agregados."""
+    mapa = {}
+    for r in ig_rows:
+        for username in r["colaboradores"]:
+            mapa.setdefault(username, []).append(r)
+    for username in mapa:
+        mapa[username].sort(key=lambda r: r["alcance"] or 0, reverse=True)
+    return mapa
+
+
 def build_creator_rows(ig_rows, creators_manual):
     """Performance orgânica real por creator, a partir dos posts marcados como
     Collab. Custo/receita/ROI são manuais (data/creators.json) — a Graph API
@@ -325,6 +337,7 @@ def main():
     por_produto = agg_by_dimensao(ig_rows, "produto")
     por_idioma  = agg_by_dimensao(ig_rows, "idioma")
     creator_rows = build_creator_rows(ig_rows, creators_manual)
+    creator_posts_map = build_creator_posts_map(ig_rows)
 
     datas_cobertas = [r["data"] for r in ig_rows if r["data"]] + [r["data"] for r in fb_rows if r["data"]]
     periodo_inicio = min(datas_cobertas) if datas_cobertas else "—"
@@ -548,6 +561,22 @@ def main():
           <td style="text-align:right">{f"R$ {c['receita']:,.0f}" if c['receita'] else '—'}</td>
           <td style="text-align:right">{f"{c['roi']}x" if c['roi'] else '—'}</td>
         </tr>""" for c in creator_rows)
+
+        def galeria_creator(c):
+            posts = creator_posts_map.get(c["username"], [])
+            cards = "".join(f"""
+        <a class="top3-card" href="{r['link'] or '#'}" target="_blank" title="{(r['legenda'] or '').replace('"', '&quot;')}">
+          {f'<img src="{r["thumb"]}" loading="lazy" alt="">' if r['thumb'] else '<div style="aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;color:var(--sub);font-size:.7rem">sem imagem</div>'}
+          <div class="top3-metric">{fmt_int(r['alcance'])}<small>Alcance · {r['formato']}</small></div>
+        </a>""" for r in posts)
+            return f"""
+      <div class="mt-3">
+        <div style="font-size:.78rem;color:var(--sub);margin-bottom:8px">@{c['username']} — criativos ({len(posts)})</div>
+        <div class="top3-wrap" style="grid-template-columns:repeat(6,1fr)">{cards}</div>
+      </div>"""
+
+        galerias_html = "".join(galeria_creator(c) for c in creator_rows)
+
         creators_table_html = f"""
     <div style="overflow-x:auto">
       <table>
@@ -561,7 +590,8 @@ def main():
         <tbody>{linhas_creator}</tbody>
       </table>
     </div>
-    <div class="text-xs mt-3" style="color:var(--sub)">Alcance/interações/salvos etc. são reais, somados a partir dos posts marcados como Collab. Custo, receita e ROI não existem na API da Meta — preencha manualmente em <code>data/creators.json</code> (chave = username do Instagram) para aparecerem aqui.</div>"""
+    <div class="text-xs mt-3" style="color:var(--sub)">Alcance/interações/salvos etc. são reais, somados a partir dos posts marcados como Collab. Custo, receita e ROI não existem na API da Meta — preencha manualmente em <code>data/creators.json</code> (chave = username do Instagram) para aparecerem aqui.</div>
+    {galerias_html}"""
     else:
         creators_table_html = """
     <div class="text-sm" style="color:var(--sub)">Nenhum creator com posts em Collab detectado ainda. Assim que houver publicações com <code>collaborators</code> preenchido, a performance orgânica real deles aparece aqui automaticamente.</div>"""
@@ -599,7 +629,8 @@ def main():
       <div><div class="kpi-label">Taxa de compartilhamento média</div><div class="kpi-val">{taxas_medias['compartilhamento'] if taxas_medias['compartilhamento'] is not None else '—'}%</div></div>
     </div>
     <div style="font-weight:600;font-size:.82rem;margin-bottom:10px;color:var(--sub)">🏆 Top 10 — Índice de Intenção <span style="text-transform:none;font-weight:400">(salvos×3 + compart.×3 + cliques perfil×2 + comentários×1 + curtidas×0,5)</span></div>
-    <div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Formato</th><th>Legenda</th><th style="text-align:right">Índice</th></tr></thead><tbody id="rank-intencao"></tbody></table></div>
+    <div id="top3-intencao" class="top3-wrap" style="grid-template-columns:repeat(6,1fr)"></div>
+    <div style="overflow-x:auto"><table><thead><tr><th>Capa</th><th>Data</th><th>Formato</th><th>Legenda</th><th style="text-align:right">Índice</th><th>Link</th></tr></thead><tbody id="rank-intencao"></tbody></table></div>
   </div>
 
   <div class="card mb-5">
@@ -814,11 +845,20 @@ const rankRow = (campo) => r => `<tr>
   <td style="text-align:right;font-weight:600">${{fN(r[campo])}}</td>
 </tr>`;
 
+const rankRowThumb = (campo) => r => `<tr>
+  <td>${{thumbCell(r.thumb)}}</td>
+  <td style="white-space:nowrap">${{r.data}}</td>
+  <td><span class="badge badge-pink">${{r.formato}}</span></td>
+  <td title="${{(r.legenda||'').replace(/"/g,'&quot;')}}">${{trunc(r.legenda, 40)}}</td>
+  <td style="text-align:right;font-weight:600">${{fN(r[campo])}}</td>
+  <td>${{r.link ? `<a class="perm" href="${{r.link}}" target="_blank">abrir</a>` : '—'}}</td>
+</tr>`;
+
 preencherTabela('rank-alcance',      RANKINGS.alcance,      rankRow('alcance'));
 preencherTabela('rank-interacoes',   RANKINGS.interacoes,   rankRow('interacoes'));
 preencherTabela('rank-visitas',      RANKINGS.visitas_perfil, rankRow('visitas_perfil'));
 preencherTabela('rank-salvos',       RANKINGS.salvos,       rankRow('salvos'));
-preencherTabela('rank-intencao',     RANKING_INTENCAO,      rankRow('indice_intencao'));
+preencherTabela('rank-intencao',     RANKING_INTENCAO,      rankRowThumb('indice_intencao'));
 
 function mudarAba(nome) {{
   document.getElementById('tab-geral').style.display = nome === 'geral' ? '' : 'none';
@@ -826,7 +866,7 @@ function mudarAba(nome) {{
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === nome));
 }}
 
-const rotuloMetrica = {{ alcance:'Alcance', interacoes:'Interações', visitas_perfil:'Visitas ao perfil', salvos:'Salvos' }};
+const rotuloMetrica = {{ alcance:'Alcance', interacoes:'Interações', visitas_perfil:'Visitas ao perfil', salvos:'Salvos', indice_intencao:'Índice de Intenção' }};
 function renderTop3(id, rows, campo, n) {{
   n = n || 3;
   const el = document.getElementById(id);
@@ -844,6 +884,7 @@ renderTop3('top3-visitas',    RANKINGS.visitas_perfil, 'visitas_perfil');
 renderTop3('top3-salvos',     RANKINGS.salvos,         'salvos');
 renderTop3('top3-stories-alcance',    STORIES_RANKINGS.alcance,    'alcance', 5);
 renderTop3('top3-stories-interacoes', STORIES_RANKINGS.interacoes, 'interacoes', 5);
+renderTop3('top3-intencao',           RANKING_INTENCAO,            'indice_intencao', 6);
 
 preencherTabela('ig-body', IG_ROWS, r => `<tr>
   <td>${{thumbCell(r.thumb)}}</td>
