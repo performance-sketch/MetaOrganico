@@ -21,6 +21,10 @@ data/*.json
 # Exceção: precisa persistir entre execuções do GitHub Actions para acumular
 # histórico de Stories (a API só expõe stories ativos, até 24h após publicar).
 !data/meta_stories_history.json
+# Exceção: mesma razão — as séries diárias de conta (reach, seguidores,
+# visualizações etc.) só trazem uma janela recente por execução, precisam
+# acumular entre execuções do GitHub Actions.
+!data/meta_account_timeseries.json
 # Exceção: curadoria manual (tags de conteúdo e dados de creators) que não vem
 # de nenhuma API — precisa ficar versionada, não é "dado gerado".
 !data/content_tags.json

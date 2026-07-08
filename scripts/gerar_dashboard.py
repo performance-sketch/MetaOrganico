@@ -179,6 +179,79 @@ def render_demografia_section(demografia):
   </div>"""
 
 
+TREND_LABELS = {
+    "visualizacoes": "Visualizações",
+    "reach": "Alcance",
+    "interacoes": "Interações com o conteúdo",
+    "cliques_link": "Cliques no link",
+    "visitas_perfil": "Visitas ao perfil",
+    "seguidores": "Seguidores",
+}
+TREND_ORDER = ["visualizacoes", "reach", "interacoes", "cliques_link", "visitas_perfil", "seguidores"]
+
+
+def _soma_janela(serie, dias_inicio, dias_fim):
+    hoje = datetime.now().date()
+    ini = (hoje - timedelta(days=dias_fim)).isoformat()
+    fim = (hoje - timedelta(days=dias_inicio)).isoformat()
+    return sum(v for d, v in serie if ini <= d <= fim)
+
+
+def render_conta_series_section(series_conta, total_seguidores_atual):
+    """Tendência de conta (Instagram) — reach e seguidores vêm de time_series
+    real (um ponto por dia); visualizações/visitas/cliques/interações vêm de
+    total_value chamado dia a dia (ver conector) — mesma origem, granularidade
+    diária de qualquer forma. É conta inteira, não segue o calendário do
+    dashboard (a API não permite recortar isso por post)."""
+    disponiveis = [chave for chave in TREND_ORDER if series_conta.get(chave)]
+    if not disponiveis:
+        return """
+  <div class="card mb-5" style="border-color:var(--border)">
+    <div class="text-sm" style="color:var(--sub)">📈 Tendência de conta não disponível — nenhuma série diária veio da API neste fetch (confira <code>instagram_series_conta_error</code> em <code>data/meta_organic.json</code>).</div>
+  </div>
+"""
+
+    cards = []
+    for chave in disponiveis:
+        serie = series_conta[chave]
+        if chave == "seguidores":
+            valor_grande = fmt_int(total_seguidores_atual)
+            delta_html = ""
+        else:
+            atual    = _soma_janela(serie, 0, 29)
+            anterior = _soma_janela(serie, 30, 59)
+            valor_grande = fmt_int(sum(v for _, v in serie))
+            if anterior:
+                pct = round((atual - anterior) / anterior * 100, 1)
+                cor = "good" if pct >= 0 else "critical"
+                seta = "▲" if pct >= 0 else "▼"
+                delta_html = f'<span class="delta {cor}">{seta} {pct}%</span>'
+            else:
+                delta_html = ""
+        cards.append(f"""
+      <div class="card">
+        <div style="font-weight:600;font-size:.85rem;margin-bottom:6px">{TREND_LABELS[chave]}</div>
+        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px">
+          <div class="kpi-val">{valor_grande}</div>{delta_html}
+        </div>
+        <canvas id="trend-{chave}" height="70"></canvas>
+      </div>""")
+
+    faltando = [TREND_LABELS[c] for c in TREND_ORDER if c not in disponiveis]
+    aviso_faltando = f'<div class="text-xs mt-3" style="color:var(--sub)">Sem dado para: {", ".join(faltando)} (métrica rejeitada pela API para este token/versão).</div>' if faltando else ""
+
+    return f"""
+  <div class="card mb-5">
+    <div style="font-weight:600;font-size:.9rem;margin-bottom:4px">📈 Tendência de conta (Instagram)</div>
+    <div class="text-xs mb-4" style="color:var(--sub)">Série diária real por métrica de conta — não segue o calendário acima (a API não permite recorte por post nessas métricas). % compara os últimos 30 dias com os 30 dias anteriores.</div>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {"".join(cards)}
+    </div>
+    {aviso_faltando}
+  </div>
+"""
+
+
 def media_format(post):
     t = (post.get("media_product_type") or post.get("media_type") or "").upper()
     if t in ("REELS", "REEL"):
@@ -290,6 +363,10 @@ def main():
     perfil     = dados.get("instagram", {}).get("perfil", {})
     demografia = dados.get("instagram", {}).get("demografia_seguidores", {})
     demografia_html = render_demografia_section(demografia)
+
+    series_file = ROOT / "data" / "meta_account_timeseries.json"
+    series_conta = load_json_or_empty(series_file)
+    conta_series_html = render_conta_series_section(series_conta, perfil.get("followers_count"))
     ig_media  = dados.get("instagram", {}).get("media", [])
     fb_posts  = dados.get("facebook_posts", [])
 
@@ -337,6 +414,7 @@ def main():
     ads_json             = safe(json.dumps(ads, ensure_ascii=False))
     organico_30d_json    = safe(json.dumps(organico_30d, ensure_ascii=False))
     creators_manual_json = safe(json.dumps(creators_manual, ensure_ascii=False))
+    conta_series_json    = safe(json.dumps({k: dict(v) for k, v in series_conta.items()}, ensure_ascii=False))
 
     if ads:
         ads_section_html = f"""
@@ -421,6 +499,9 @@ def main():
   .date-input {{ background:var(--surface2); border:1px solid var(--border); color:var(--text); padding:7px 10px; border-radius:8px; font-size:.82rem; color-scheme:dark; }}
   .preset-btn {{ background:var(--surface2); border:1px solid var(--border); color:var(--sub); padding:7px 12px; border-radius:8px; font-size:.78rem; font-weight:600; cursor:pointer; }}
   .preset-btn.active {{ background:var(--indigo); color:#fff; border-color:var(--indigo); }}
+  .delta {{ font-size:.78rem; font-weight:700; }}
+  .delta.good {{ color:var(--green); }}
+  .delta.critical {{ color:var(--red); }}
 </style>
 </head>
 <body class="p-4 md:p-8 max-w-[1400px] mx-auto">
@@ -473,6 +554,7 @@ def main():
     <div class="card"><div class="kpi-label">Seguidores gerados (IG)</div><div class="kpi-val" id="kpi-seguidores-ig">…</div></div>
     <div class="card"><div class="kpi-label">Posts em Collab (IG)</div><div class="kpi-val" id="kpi-collab-ig">…</div></div>
   </div>
+{conta_series_html}
 {ads_section_html}
   <div class="card mb-5" style="border-color:var(--cyan);background:rgba(6,182,212,.06)">
     <div class="text-sm">ℹ️ <strong>Stories</strong>: a API do Instagram só expõe stories ativos (até 24h após publicar) — não existe histórico retroativo. Os <span id="stories-count-msg">0</span> stories abaixo são os acumulados dentro do período selecionado; o total geral cresce a cada execução do <code>fetch_meta_organic.py</code>.</div>
@@ -679,6 +761,7 @@ const STORY_ROWS_ALL  = {story_rows_json};
 const ADS             = {ads_json};
 const ORGANICO_30D    = {organico_30d_json};
 const CREATORS_MANUAL = {creators_manual_json};
+const CONTA_SERIES    = {conta_series_json};
 
 const fN = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('pt-BR');
 const trunc = (s, n) => (s || '').length > n ? s.slice(0, n) + '…' : (s || '—');
@@ -1064,6 +1147,31 @@ if (ADS) {{
       scales: {{ x: {{ ticks: {{ color: '#94a3b8' }}, grid: {{ display: false }} }}, y: {{ ticks: {{ color: '#94a3b8' }}, grid: {{ color: 'rgba(51,65,85,.4)' }} }} }} }}
   }});
 }}
+
+Object.keys(CONTA_SERIES).forEach(chave => {{
+  const el = document.getElementById('trend-' + chave);
+  if (!el) return;
+  const pontos = Object.entries(CONTA_SERIES[chave]).sort((a, b) => a[0] < b[0] ? -1 : 1);
+  new Chart(el, {{
+    type: 'line',
+    data: {{
+      labels: pontos.map(p => p[0]),
+      datasets: [{{
+        data: pontos.map(p => p[1]),
+        borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,.12)',
+        fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2,
+      }}]
+    }},
+    options: {{
+      responsive: true, maintainAspectRatio: false,
+      plugins: {{ legend: {{ display: false }}, tooltip: {{ callbacks: {{ title: items => items[0].label }} }} }},
+      scales: {{
+        x: {{ ticks: {{ display: false }}, grid: {{ display: false }} }},
+        y: {{ ticks: {{ color: '#94a3b8', maxTicksLimit: 4 }}, grid: {{ color: 'rgba(51,65,85,.4)' }} }},
+      }},
+    }}
+  }});
+}});
 </script>
 </body>
 </html>

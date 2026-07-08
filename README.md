@@ -101,6 +101,19 @@ duas vezes.
   seguidores** (abaixo disso vem vazio, por privacidade — não é bug daqui) e exige a permissão
   `instagram_manage_insights` (já listada acima). Se algum dos 4 breakdowns não vier, o dashboard
   mostra "não disponível" só naquele quadro, sem esconder os outros três.
+- **Tendência de conta (reach, seguidores, visualizações, visitas, cliques no link, interações)**
+  — **real**, na Visão Geral, replicando os cartões de linha do Meta Business Suite. Assim como a
+  demografia, é conta inteira e **não segue o calendário** do dashboard. Duas origens diferentes
+  por trás (testado contra a API real, v19.0):
+  - `reach` e `follower_count` (seguidores) aceitam `metric_type=time_series` — um ponto por dia,
+    barato. **`follower_count` só responde para os últimos ~30 dias**, mesmo pedindo mais (limite
+    da própria Meta, não do código) — por isso o gráfico de Seguidores é mais curto que os outros.
+  - `views`, `profile_views`, `visitas ao perfil`, `website_clicks` e `total_interactions` **só
+    aceitam `metric_type=total_value`** (um número agregado, não série) — pra virar gráfico diário,
+    o conector faz uma chamada por dia (em lotes de até 50 via endpoint de batch). Isso é caro, então
+    fica limitado a `ACCOUNT_TIMESERIES_DAYS` (padrão 90 dias). Para uma janela maior, rode uma vez
+    com `ACCOUNT_TIMESERIES_DAYS=365 python scripts/fetch_meta_organic.py` — o resultado se acumula
+    em `data/meta_account_timeseries.json` (mesmo princípio do backfill de posts).
 
 ### Curadoria manual (`data/content_tags.json` e `data/creators.json`)
 

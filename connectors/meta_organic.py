@@ -325,6 +325,101 @@ def fetch_audience_demographics(ig_id, token):
     return resultado
 
 
+# Testado manualmente contra a API real (v19.0): só 'reach' e 'follower_count'
+# aceitam metric_type=time_series (um ponto por dia, barato — pagina em blocos
+# de 30 dias). 'views', 'profile_views', 'website_clicks' e 'total_interactions'
+# SÓ aceitam metric_type=total_value (um número agregado do período) — pra virar
+# série diária, cada dia precisa de uma chamada própria. Isso é caro, então essas
+# quatro usam uma janela bem menor (ACCOUNT_TIMESERIES_DAYS) via lote (batch de
+# até 50 dias por request HTTP), enquanto reach/seguidores pegam o período cheio.
+TIMESERIES_METRICS = {"reach": "reach", "seguidores": "follower_count"}
+TOTAL_VALUE_DAILY_METRICS = {
+    "visualizacoes": "views",
+    "visitas_perfil": "profile_views",
+    "cliques_link": "website_clicks",
+    "interacoes": "total_interactions",
+}
+
+
+def _fetch_metric_timeseries(ig_id, token, metric, days):
+    """Série diária via metric_type=time_series, paginando do dia mais recente
+    para trás em blocos de 30 dias (limite da API). Para no primeiro bloco que
+    vier vazio/der erro — captura o quanto der antes do limite (ex.:
+    follower_count só respondeu com dado além disso em alguns testes)."""
+    fim = datetime.now().date()
+    limite = fim - timedelta(days=days)
+    serie = {}
+    janela_fim = fim
+    while janela_fim >= limite:
+        janela_inicio = max(janela_fim - timedelta(days=29), limite)
+        try:
+            resp = _get(f"{ig_id}/insights", token, {
+                "metric": metric, "period": "day", "metric_type": "time_series",
+                "since": janela_inicio.strftime("%Y-%m-%d"),
+                "until": (janela_fim + timedelta(days=1)).strftime("%Y-%m-%d"),
+            })
+        except requests.RequestException:
+            break
+        pontos = ((resp.get("data") or [{}])[0].get("values") or [])
+        if not pontos:
+            break
+        for ponto in pontos:
+            data_str = (ponto.get("end_time") or "")[:10]
+            if data_str:
+                serie[data_str] = int(ponto.get("value", 0) or 0)
+        janela_fim = janela_inicio - timedelta(days=1)
+    return serie
+
+
+def _fetch_metric_total_value_daily(ig_id, token, metric, days):
+    """Série diária via metric_type=total_value — uma chamada por dia,
+    agrupada em lotes de até 50 dias por request HTTP (endpoint de batch)."""
+    fim = datetime.now().date()
+    todos_os_dias = [fim - timedelta(days=i) for i in range(days)]
+    serie = {}
+    for i in range(0, len(todos_os_dias), 50):
+        lote = todos_os_dias[i:i + 50]
+        batch = []
+        for dia in lote:
+            ate = (dia + timedelta(days=1)).strftime("%Y-%m-%d")
+            batch.append({
+                "method": "GET",
+                "relative_url": f"{ig_id}/insights?metric={metric}&period=day&metric_type=total_value&since={dia}&until={ate}",
+            })
+        try:
+            r = requests.post(GRAPH_BASE, data={
+                "access_token": token, "batch": json.dumps(batch), "include_headers": "false",
+            }, timeout=30)
+            r.raise_for_status()
+        except requests.RequestException:
+            continue
+        for dia, res in zip(lote, r.json() or []):
+            if not res or res.get("code") != 200:
+                continue
+            body = json.loads(res.get("body", "{}"))
+            dados_metric = body.get("data") or []
+            if dados_metric:
+                serie[dia.strftime("%Y-%m-%d")] = int((dados_metric[0].get("total_value") or {}).get("value", 0) or 0)
+    return serie
+
+
+def fetch_account_timeseries(ig_id, token, days=None):
+    """Séries diárias de conta (alcance, seguidores, visualizações, visitas ao
+    perfil, cliques no link, interações) para os gráficos de tendência da
+    Visão Geral. Cada métrica é isolada — uma falhar não derruba as outras."""
+    days = days or int(os.environ.get("ACCOUNT_TIMESERIES_DAYS", "90"))
+    resultado = {}
+    for chave, metric in TIMESERIES_METRICS.items():
+        serie = _fetch_metric_timeseries(ig_id, token, metric, days)
+        if serie:
+            resultado[chave] = sorted(serie.items())
+    for chave, metric in TOTAL_VALUE_DAILY_METRICS.items():
+        serie = _fetch_metric_total_value_daily(ig_id, token, metric, days)
+        if serie:
+            resultado[chave] = sorted(serie.items())
+    return resultado
+
+
 def fetch_all(days=None):
     """Ponto de entrada único: resolve página/IG e busca tudo (FB + IG orgânico)."""
     token = _require_token()
@@ -358,5 +453,9 @@ def fetch_all(days=None):
             resultado["instagram"]["demografia_seguidores"] = fetch_audience_demographics(ig_id, token)
         except (requests.RequestException, MetaOrganicError) as e:
             resultado["instagram_demografia_error"] = str(e)
+        try:
+            resultado["instagram"]["series_conta"] = fetch_account_timeseries(ig_id, token)
+        except (requests.RequestException, MetaOrganicError) as e:
+            resultado["instagram_series_conta_error"] = str(e)
 
     return resultado

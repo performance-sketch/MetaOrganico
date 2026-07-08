@@ -44,6 +44,27 @@ def _merge_stories_history(novos, out_dir):
     return lista
 
 
+def _merge_account_timeseries(novas_series, out_dir):
+    """Acumula as séries diárias de conta (reach, seguidores, visualizações etc.)
+    ao longo do tempo. Cada execução só traz uma janela recente
+    (ACCOUNT_TIMESERIES_DAYS, padrão 90 dias) — sem acumular, o histórico mais
+    antigo se perderia a cada execução. Mesmo espírito de _merge_stories_history."""
+    hist_path = out_dir / "meta_account_timeseries.json"
+    historico = {}
+    if hist_path.exists():
+        try:
+            historico = json.loads(hist_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            historico = {}
+    for metrica, pontos in (novas_series or {}).items():
+        serie = dict(historico.get(metrica, []))
+        for data_str, valor in pontos:
+            serie[data_str] = valor
+        historico[metrica] = sorted(serie.items())
+    hist_path.write_text(json.dumps(historico, ensure_ascii=False, indent=2), encoding="utf-8")
+    return historico
+
+
 def _merge_by_id(antigos, novos):
     """União por id: mantém o que já foi buscado em execuções anteriores e
     substitui pelo dado mais recente quando o mesmo post aparece de novo.
@@ -90,12 +111,16 @@ def main():
     stories_ativos = dados.get("instagram", {}).get("stories_ativos", [])
     historico = _merge_stories_history(stories_ativos, out_dir)
 
+    series_novas = dados.get("instagram", {}).get("series_conta", {})
+    series_historico = _merge_account_timeseries(series_novas, out_dir)
+
     out_path.write_text(json.dumps(dados, ensure_ascii=False, indent=2), encoding="utf-8")
 
     n_fb = len(dados.get("facebook_posts", []))
     n_ig = len(dados.get("instagram", {}).get("media", []))
     print(f"OK: {n_fb} posts Facebook (histórico acumulado), {n_ig} posts Instagram (histórico acumulado) -> {out_path}")
     print(f"    Stories ativos agora: {len(stories_ativos)} | histórico acumulado: {len(historico)}")
+    print(f"    Séries de conta: {', '.join(f'{k} ({len(v)}d)' for k, v in series_historico.items()) or 'nenhuma'}")
 
     if dados.get("facebook_error"):
         print(f"AVISO Facebook: {dados['facebook_error']}")
@@ -103,6 +128,10 @@ def main():
         print(f"AVISO Instagram: {dados['instagram_error']}")
     if dados.get("instagram_stories_error"):
         print(f"AVISO Stories: {dados['instagram_stories_error']}")
+    if dados.get("instagram_demografia_error"):
+        print(f"AVISO Demografia: {dados['instagram_demografia_error']}")
+    if dados.get("instagram_series_conta_error"):
+        print(f"AVISO Séries de conta: {dados['instagram_series_conta_error']}")
 
 
 if __name__ == "__main__":
