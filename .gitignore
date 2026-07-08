@@ -18,6 +18,9 @@ env/
 # Dados gerados
 data/*.json
 !data/.gitkeep
+# Exceção: precisa persistir entre execuções do GitHub Actions para acumular
+# histórico de Stories (a API só expõe stories ativos, até 24h após publicar).
+!data/meta_stories_history.json
 
 # IDEs
 .vscode/

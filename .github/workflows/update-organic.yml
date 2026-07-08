@@ -1,0 +1,49 @@
+name: Update Organic Dashboard
+
+on:
+  schedule:
+    - cron: '0 11 * * *'   # 08:00 BRT — diário, para acumular stories antes de expirarem (24h)
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch Meta organic data
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_PAGE_ID: ${{ secrets.META_PAGE_ID }}
+          META_IG_ACCOUNT_ID: ${{ secrets.META_IG_ACCOUNT_ID }}
+        run: python scripts/fetch_meta_organic.py
+
+      - name: Fetch Meta Ads snapshot (opcional, via REPORTCLAUDE)
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+        run: python scripts/fetch_meta_ads_snapshot.py || true
+
+      - name: Regenerate dashboard
+        run: python scripts/gerar_dashboard.py
+
+      - name: Commit and push if data changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.html data/meta_stories_history.json
+          git diff --staged --quiet || (
+            git commit -m "chore: auto-update organic dashboard [skip ci]" &&
+            git push
+          )
