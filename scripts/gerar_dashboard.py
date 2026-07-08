@@ -244,7 +244,7 @@ def render_conta_series_section(series_conta, total_seguidores_atual):
   <div class="card mb-5">
     <div style="font-weight:600;font-size:.9rem;margin-bottom:4px">📈 Tendência de conta (Instagram)</div>
     <div class="text-xs mb-4" style="color:var(--sub)">Série diária real por métrica de conta — não segue o calendário acima (a API não permite recorte por post nessas métricas). % compara os últimos 30 dias com os 30 dias anteriores.</div>
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       {"".join(cards)}
     </div>
     {aviso_faltando}
