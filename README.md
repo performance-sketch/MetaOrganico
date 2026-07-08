@@ -93,6 +93,14 @@ duas vezes.
 - **Creators**: alcance/interações/salvos/etc. por creator são **reais**, somados a partir dos
   posts com `collaborators` preenchido. **Custo, receita e ROI não existem em nenhuma API da
   Meta** — vêm de contrato e do Rezdy, fora do escopo deste conector.
+- **Demografia dos seguidores (país, cidade, idade, gênero)** — **real**, vem do metric
+  `follower_demographics` da Graph API (ver `fetch_audience_demographics` em
+  `connectors/meta_organic.py`). Diferença importante em relação a tudo mais na aba: isso **não é
+  por post** — é uma foto da base de seguidores no momento do fetch, então **não muda com o
+  calendário** do dashboard. A própria Meta só libera esse dado com a conta tendo **pelo menos 100
+  seguidores** (abaixo disso vem vazio, por privacidade — não é bug daqui) e exige a permissão
+  `instagram_manage_insights` (já listada acima). Se algum dos 4 breakdowns não vier, o dashboard
+  mostra "não disponível" só naquele quadro, sem esconder os outros três.
 
 ### Curadoria manual (`data/content_tags.json` e `data/creators.json`)
 

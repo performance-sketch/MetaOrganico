@@ -283,6 +283,48 @@ def fetch_instagram_stories(ig_id, token):
     return stories
 
 
+DEMOGRAPHIC_BREAKDOWNS = ("country", "city", "age", "gender")
+
+
+def fetch_audience_demographics(ig_id, token):
+    """Demografia real dos SEGUIDORES atuais (país, cidade, idade, gênero) via o
+    metric `follower_demographics` (metric_type=total_value + breakdown).
+
+    Isso é diferente de tudo mais neste conector: não é por post, é um retrato
+    da base de seguidores agora — não dá pra filtrar por período nem cruzar
+    com um post específico. Requer `instagram_manage_insights` no token e,
+    por regra da própria Meta, só populam com >= 100 seguidores (abaixo disso
+    a API retorna vazio por privacidade, não é bug daqui). Cada breakdown é
+    uma chamada separada; se uma falhar (versão da API, permissão, conta
+    pequena demais), as outras seguem normalmente — o breakdown que falhar
+    fica de fora do resultado em vez de derrubar tudo.
+    """
+    resultado = {}
+    for breakdown in DEMOGRAPHIC_BREAKDOWNS:
+        try:
+            resp = _get(f"{ig_id}/insights", token, {
+                "metric": "follower_demographics",
+                "period": "lifetime",
+                "metric_type": "total_value",
+                "breakdown": breakdown,
+            })
+        except requests.RequestException:
+            continue
+        dados = resp.get("data") or []
+        if not dados:
+            continue
+        breakdowns = ((dados[0].get("total_value") or {}).get("breakdowns") or [])
+        if not breakdowns:
+            continue
+        valores = {}
+        for item in (breakdowns[0].get("results") or []):
+            chave = ",".join(item.get("dimension_values", [])) or "?"
+            valores[chave] = valores.get(chave, 0) + int(item.get("value", 0) or 0)
+        if valores:
+            resultado[breakdown] = sorted(valores.items(), key=lambda kv: kv[1], reverse=True)
+    return resultado
+
+
 def fetch_all(days=None):
     """Ponto de entrada único: resolve página/IG e busca tudo (FB + IG orgânico)."""
     token = _require_token()
@@ -312,5 +354,9 @@ def fetch_all(days=None):
             resultado["instagram"]["stories_ativos"] = fetch_instagram_stories(ig_id, token)
         except (requests.RequestException, MetaOrganicError) as e:
             resultado["instagram_stories_error"] = str(e)
+        try:
+            resultado["instagram"]["demografia_seguidores"] = fetch_audience_demographics(ig_id, token)
+        except (requests.RequestException, MetaOrganicError) as e:
+            resultado["instagram_demografia_error"] = str(e)
 
     return resultado

@@ -115,6 +115,70 @@ def fmt_int(n):
     return f"{n:,}".replace(",", ".") if n is not None else "—"
 
 
+# Só para exibição — a API devolve código ISO-3166 alpha-2. Código que não
+# estiver aqui aparece como o próprio código (não inventa nome de país).
+COUNTRY_NAMES = {
+    "BR": "Brasil", "US": "Estados Unidos", "PT": "Portugal", "AR": "Argentina",
+    "CL": "Chile", "PE": "Peru", "MX": "México", "CO": "Colômbia", "EC": "Equador",
+    "PY": "Paraguai", "ES": "Espanha", "GB": "Reino Unido", "FR": "França",
+    "IT": "Itália", "UY": "Uruguai", "PR": "Porto Rico", "DE": "Alemanha",
+    "AE": "Emirados Árabes Unidos", "CA": "Canadá", "IN": "Índia", "RU": "Rússia",
+    "AU": "Austrália", "IE": "Irlanda", "CH": "Suíça", "NL": "Holanda",
+    "CR": "Costa Rica", "VE": "Venezuela", "BE": "Bélgica", "IR": "Irã",
+    "PL": "Polônia", "TR": "Turquia", "BO": "Bolívia", "GT": "Guatemala",
+    "MA": "Marrocos", "ID": "Indonésia", "DO": "Rep. Dominicana", "DZ": "Argélia",
+    "UA": "Ucrânia", "JP": "Japão", "CU": "Cuba", "PA": "Panamá", "RO": "Romênia",
+    "ZA": "África do Sul", "AT": "Áustria", "TH": "Tailândia",
+}
+GENDER_LABELS = {"M": "Masculino", "F": "Feminino", "U": "Não informado"}
+
+
+def render_demografia_section(demografia):
+    """Demografia REAL dos seguidores atuais (follower_demographics da Graph
+    API) — não é por post, não segue o calendário do dashboard. É a base de
+    seguidores agora, sempre que este script for gerado de novo."""
+
+    def tabela(chave, titulo, rotulo_valor, mapa_nomes=None, limite=None):
+        pares = demografia.get(chave)
+        if not pares:
+            return f"""<div>
+        <div style="font-weight:600;font-size:.82rem;margin-bottom:10px;color:var(--sub)">{titulo}</div>
+        <div class="text-sm" style="color:var(--sub)">Não disponível (campo rejeitado pela API para este token/versão, ou a conta tem menos de 100 seguidores — abaixo disso a Meta não libera demografia, por privacidade).</div>
+      </div>"""
+        total = sum(v for _, v in pares)
+        linhas = pares[:limite] if limite else pares
+        corpo = "".join(f"""<tr>
+          <td>{(mapa_nomes or {}).get(v, v)}</td>
+          <td style="text-align:right">{fmt_int(n)}</td>
+          <td style="text-align:right">{round(n / total * 100, 1)}%</td>
+        </tr>""" for v, n in linhas)
+        return f"""<div>
+        <div style="font-weight:600;font-size:.82rem;margin-bottom:10px;color:var(--sub)">{titulo}</div>
+        <div style="overflow-x:auto"><table><thead><tr><th>{rotulo_valor}</th><th style="text-align:right">Seguidores</th><th style="text-align:right">%</th></tr></thead><tbody>{corpo}</tbody></table></div>
+      </div>"""
+
+    if not demografia:
+        return """
+  <div class="card mb-5" style="border-color:var(--border)">
+    <div class="text-sm" style="color:var(--sub)">👥 Demografia de seguidores não disponível — nenhum breakdown (país/cidade/idade/gênero) veio da API neste fetch. Confira <code>instagram_demografia_error</code> em <code>data/meta_organic.json</code> ou se a conta tem pelo menos 100 seguidores.</div>
+  </div>
+"""
+
+    return f"""
+  <div class="card mb-5">
+    <div style="font-weight:600;font-size:.9rem;margin-bottom:4px">👥 Demografia dos seguidores (atual)</div>
+    <div class="text-xs mb-4" style="color:var(--sub)">Retrato dos seguidores <strong>agora</strong> — dado real da API (<code>follower_demographics</code>), mas é uma foto do momento: não é por post e não muda com o calendário acima.</div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+      {tabela("gender", "Gênero", "Gênero", GENDER_LABELS)}
+      {tabela("age", "Faixa etária", "Faixa")}
+    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {tabela("country", "Top países", "País", COUNTRY_NAMES, limite=15)}
+      {tabela("city", "Top cidades", "Cidade", limite=15)}
+    </div>
+  </div>"""
+
+
 def media_format(post):
     t = (post.get("media_product_type") or post.get("media_type") or "").upper()
     if t in ("REELS", "REEL"):
@@ -223,7 +287,9 @@ def build_story_rows(stories):
 
 def main():
     dados = json.loads(DATA_FILE.read_text(encoding="utf-8"))
-    perfil    = dados.get("instagram", {}).get("perfil", {})
+    perfil     = dados.get("instagram", {}).get("perfil", {})
+    demografia = dados.get("instagram", {}).get("demografia_seguidores", {})
+    demografia_html = render_demografia_section(demografia)
     ig_media  = dados.get("instagram", {}).get("media", [])
     fb_posts  = dados.get("facebook_posts", [])
 
@@ -585,7 +651,7 @@ def main():
       </div>
     </div>
   </div>
-
+{demografia_html}
   <div class="card mb-5">
     <div style="font-weight:600;font-size:.9rem;margin-bottom:4px">🤝 Creators — performance orgânica</div>
     <div style="overflow-x:auto">
