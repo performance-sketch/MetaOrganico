@@ -42,6 +42,7 @@ def build_ig_rows(media):
             "legenda": (p.get("caption") or "")[:140],
             "link": p.get("permalink", ""),
             "thumb": p.get("thumbnail_url") or p.get("media_url") or "",
+            "colaboradores": p.get("collaborators") or [],
             "curtidas": p.get("like_count", 0) or 0,
             "comentarios": p.get("comments_count", 0) or 0,
             "alcance": ins.get("reach"),
@@ -63,6 +64,7 @@ def build_fb_rows(posts):
             "id": p.get("id", ""),
             "data": p.get("criado_em", ""),
             "legenda": (p.get("mensagem") or "")[:140],
+            "thumb": p.get("thumb") or "",
             "curtidas": p.get("curtidas"),
             "comentarios": p.get("comentarios"),
             "compartilhamentos": p.get("compartilhamentos"),
@@ -145,6 +147,8 @@ def main():
     total_seguidores = sum(r["seguidores"] for r in ig_rows if r["seguidores"] is not None)
 
     por_formato = agg_by_format(ig_rows)
+    collab_rows = [r for r in ig_rows if r["colaboradores"]]
+    collab_rows.sort(key=lambda r: r["alcance"] or 0, reverse=True)
 
     corte_30d = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
     ig_30d = [r for r in ig_rows if r["data"] >= corte_30d]
@@ -302,6 +306,26 @@ def main():
   </div>
 """
 
+    if collab_rows:
+        collab_cards = "".join(f"""
+      <a class="top3-card" href="{r['link'] or '#'}" target="_blank" title="{(r['legenda'] or '').replace('"', '&quot;')}">
+        {f'<img src="{r["thumb"]}" loading="lazy" alt="">' if r['thumb'] else '<div style="aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;color:var(--sub);font-size:.7rem">sem imagem</div>'}
+        <div class="top3-metric">{fmt_int(r['alcance'])}<small>com @{', @'.join(r['colaboradores'])} · {r['formato']}</small></div>
+      </a>""" for r in collab_rows[:6])
+        collab_section_html = f"""
+  <div class="card mb-5">
+    <div style="font-weight:600;font-size:.9rem;margin-bottom:4px">🤝 Publicações em Collab (Instagram) — {len(collab_rows)}</div>
+    <div class="text-xs mb-4" style="color:var(--sub)">Posts publicados em coautoria com outra conta — o alcance tende a somar parte da audiência do colaborador. Campo experimental: valide com a Graph API se algum post aparecer sem colaborador esperado.</div>
+    <div class="top3-wrap" style="grid-template-columns:repeat(6,1fr)">{collab_cards}</div>
+  </div>
+"""
+    else:
+        collab_section_html = """
+  <div class="card mb-5" style="border-color:var(--border)">
+    <div class="text-sm" style="color:var(--sub)">🤝 Nenhuma publicação em Collab detectada no período (ou o campo <code>collaborators</code> não está disponível para este token/versão da API).</div>
+  </div>
+"""
+
     html = f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -341,6 +365,9 @@ def main():
   .top3-rank {{ position:absolute; top:6px; left:6px; width:22px; height:22px; border-radius:99px; background:rgba(15,23,42,.85); color:#fff; font-size:.72rem; font-weight:700; display:flex; align-items:center; justify-content:center; }}
   .top3-metric {{ position:absolute; bottom:0; left:0; right:0; padding:6px 8px; background:linear-gradient(0deg,rgba(15,23,42,.92),transparent); font-size:.78rem; font-weight:700; }}
   .top3-metric small {{ display:block; font-size:.62rem; font-weight:500; color:var(--sub); text-transform:uppercase; letter-spacing:.03em; }}
+  .thumb-cell {{ width:44px; height:44px; border-radius:6px; object-fit:cover; display:block; background:var(--surface2); }}
+  .thumb-cell.empty {{ display:flex; align-items:center; justify-content:center; color:var(--sub); font-size:.6rem; }}
+  .badge-collab {{ background:rgba(34,197,94,.15); color:#4ade80; }}
 </style>
 </head>
 <body class="p-4 md:p-8 max-w-[1400px] mx-auto">
@@ -367,9 +394,11 @@ def main():
     <div class="card"><div class="kpi-label">Interações (IG)</div><div class="kpi-val">{fmt_int(total_interacoes)}</div></div>
     <div class="card"><div class="kpi-label">Visitas ao perfil (IG)</div><div class="kpi-val">{fmt_int(total_visitas)}</div></div>
     <div class="card"><div class="kpi-label">Seguidores gerados (IG)</div><div class="kpi-val">{fmt_int(total_seguidores)}</div></div>
+    <div class="card"><div class="kpi-label">Posts em Collab (IG)</div><div class="kpi-val">{len(collab_rows)}</div></div>
   </div>
 {ads_section_html}
 {stories_section_html}
+{collab_section_html}
   <!-- Por formato -->
   <div class="card mb-5">
     <div style="font-weight:600;font-size:.9rem;margin-bottom:16px">📊 Instagram — Desempenho médio por formato</div>
@@ -418,7 +447,7 @@ def main():
     <div style="overflow-x:auto;max-height:500px">
       <table>
         <thead><tr>
-          <th>Data</th><th>Formato</th><th>Legenda</th><th style="text-align:right">Alcance</th>
+          <th>Capa</th><th>Data</th><th>Formato</th><th>Legenda</th><th style="text-align:right">Alcance</th>
           <th style="text-align:right">Interações</th><th style="text-align:right">Salvos</th>
           <th style="text-align:right">Compart.</th><th style="text-align:right">Visitas perfil</th>
           <th style="text-align:right">Seguidores</th><th>Link</th>
@@ -434,7 +463,7 @@ def main():
     <div style="overflow-x:auto;max-height:500px">
       <table>
         <thead><tr>
-          <th>Data</th><th>Legenda</th><th style="text-align:right">Curtidas</th>
+          <th>Capa</th><th>Data</th><th>Legenda</th><th style="text-align:right">Curtidas</th>
           <th style="text-align:right">Comentários</th><th style="text-align:right">Compart.</th>
           <th style="text-align:right">Cliques</th><th style="text-align:right">Video views</th>
         </tr></thead>
@@ -455,6 +484,9 @@ const STORIES_RANKINGS = {story_rankings_json};
 
 const fN = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('pt-BR');
 const trunc = (s, n) => (s || '').length > n ? s.slice(0, n) + '…' : (s || '—');
+const thumbCell = thumb => thumb
+  ? `<img class="thumb-cell" src="${{thumb}}" loading="lazy" alt="">`
+  : `<div class="thumb-cell empty">—</div>`;
 
 function preencherTabela(id, rows, renderRow) {{
   const el = document.getElementById(id);
@@ -500,8 +532,9 @@ renderTop3('top3-stories-alcance',    STORIES_RANKINGS.alcance,    'alcance', 5)
 renderTop3('top3-stories-interacoes', STORIES_RANKINGS.interacoes, 'interacoes', 5);
 
 preencherTabela('ig-body', IG_ROWS, r => `<tr>
+  <td>${{thumbCell(r.thumb)}}</td>
   <td style="white-space:nowrap">${{r.data}}</td>
-  <td><span class="badge badge-pink">${{r.formato}}</span></td>
+  <td><span class="badge badge-pink">${{r.formato}}</span>${{r.colaboradores && r.colaboradores.length ? ` <span class="badge badge-collab" title="Collab com @${{r.colaboradores.join(', @')}}">🤝 collab</span>` : ''}}</td>
   <td title="${{(r.legenda||'').replace(/"/g,'&quot;')}}">${{trunc(r.legenda, 50)}}</td>
   <td style="text-align:right">${{fN(r.alcance)}}</td>
   <td style="text-align:right">${{fN(r.interacoes)}}</td>
@@ -513,6 +546,7 @@ preencherTabela('ig-body', IG_ROWS, r => `<tr>
 </tr>`);
 
 preencherTabela('fb-body', FB_ROWS, r => `<tr>
+  <td>${{thumbCell(r.thumb)}}</td>
   <td style="white-space:nowrap">${{r.data}}</td>
   <td title="${{(r.legenda||'').replace(/"/g,'&quot;')}}">${{trunc(r.legenda, 60)}}</td>
   <td style="text-align:right">${{fN(r.curtidas)}}</td>

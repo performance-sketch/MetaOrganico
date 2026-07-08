@@ -34,6 +34,15 @@ O `.env` nunca é commitado (está no `.gitignore`).
   tempo, rodando `fetch_meta_organic.py` periodicamente (ex.: diariamente, antes de cada story expirar).
   O histórico acumulado fica em `data/meta_stories_history.json` (local, gitignored) e cresce a cada
   execução; nada se perde entre execuções, mas nada anterior ao início da coleta pode ser recuperado.
+- **Thumbnail do Facebook vem do campo `full_picture`** do post (capa/imagem de destaque). Para posts
+  sem imagem (ex.: texto puro), fica vazio — o dashboard mostra "—" no lugar.
+- **Colaboradores de post Collab do Instagram são experimentais.** O campo `collaborators` (usernames
+  co-autores de um post feito com "Adicionar colaborador") não é consistentemente documentado nas
+  versões públicas da Graph API — o suporte de leitura pode variar por versão/permissão do token. O
+  conector busca esse campo em lote por post e, se a API rejeitar (campo inexistente/sem permissão),
+  trata como "sem colaboradores" em vez de falhar o fetch inteiro. Se posts que você sabe serem collab
+  não aparecerem marcados no dashboard, valide o campo manualmente contra a Graph API antes de assumir
+  que é um bug do código.
 
 ## Rodar
 

@@ -90,7 +90,7 @@ def fetch_facebook_posts(page_id, page_token, days=90):
     corte = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
     todos, data = [], _get(f"{page_id}/posts", page_token, {
-        "fields": "id,message,story,created_time", "limit": 100,
+        "fields": "id,message,story,created_time,full_picture", "limit": 100,
     })
     while True:
         lote = data.get("data", [])
@@ -131,6 +131,7 @@ def fetch_facebook_posts(page_id, page_token, days=90):
             "tipo": post.get("type", "status"),
             "mensagem": (post.get("message") or post.get("story") or "")[:180],
             "criado_em": post.get("created_time", "")[:10],
+            "thumb": post.get("full_picture") or "",
             "impressoes": None,   # não disponível via API (descontinuado)
             "alcance": None,      # não disponível via API (descontinuado)
             "engajados": None,    # não disponível via API (descontinuado)
@@ -180,6 +181,41 @@ def _fetch_media_insights_batch(media_list, token):
     return resultado
 
 
+def _fetch_collaborators_batch(media_list, token):
+    """Colaboradores (Instagram Collab post) por mídia, em lote de até 50 por chamada.
+
+    EXPERIMENTAL: o campo `collaborators` (usernames co-autores de um post Collab)
+    não é consistentemente documentado nas versões públicas da Graph API — o suporte
+    de leitura pode variar por versão/permissão. Se a API rejeitar o campo (erro
+    'nonexisting field' ou similar), tratamos como "sem colaboradores" (lista vazia)
+    em vez de quebrar o restante do fetch, no mesmo espírito dos outros campos
+    descontinuados/instáveis deste conector. Recomenda-se validar com um token real
+    antes de confiar nesse dado.
+    """
+    resultado = {}
+    ids = [m["id"] for m in media_list if "id" in m]
+    if not ids:
+        return resultado
+
+    for i in range(0, len(ids), 50):
+        lote  = ids[i:i + 50]
+        batch = [{"method": "GET", "relative_url": f"{mid}?fields=collaborators"} for mid in lote]
+        try:
+            r = requests.post(GRAPH_BASE, data={
+                "access_token": token, "batch": json.dumps(batch), "include_headers": "false",
+            }, timeout=30)
+            r.raise_for_status()
+        except requests.RequestException:
+            continue
+        for mid, res in zip(lote, r.json() or []):
+            if not res or res.get("code") != 200:
+                continue
+            body = json.loads(res.get("body", "{}"))
+            usuarios = (body.get("collaborators") or {}).get("data", [])
+            resultado[mid] = [u.get("username") for u in usuarios if u.get("username")]
+    return resultado
+
+
 def fetch_instagram_posts(ig_id, token, days=90, with_insights=True):
     """Perfil + posts orgânicos do Instagram Business Account, com insights por post."""
     resultado = {"perfil": {}, "media": []}
@@ -203,8 +239,10 @@ def fetch_instagram_posts(ig_id, token, days=90, with_insights=True):
 
     if with_insights and posts:
         insights = _fetch_media_insights_batch(posts, token)
+        colaboradores = _fetch_collaborators_batch(posts, token)
         for post in posts:
             post["insights"] = insights.get(post["id"], {})
+            post["collaborators"] = colaboradores.get(post["id"], [])
 
     resultado["media"] = posts
     return resultado
