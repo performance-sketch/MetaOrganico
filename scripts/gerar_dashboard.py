@@ -48,6 +48,25 @@ IDIOMA_MARCADORES = [
     ("Español", ["vuelo", "reserva", "experiencia", " tú ", "increíble"]),
     ("English", [" the ", " you ", " book ", " flight ", " experience "]),
 ]
+# Público provável: primeiro tenta ocasião/perfil explícito na legenda; se não
+# achar nada, cai para uma estimativa grosseira pelo idioma (idioma
+# estrangeiro -> turista internacional, português -> público local/nacional).
+# É a heurística mais fraca das quatro — trate como ponto de partida, não
+# como segmentação confiável; corrija via data/content_tags.json quando puder.
+PUBLICO_KEYWORDS = [
+    ("Lua de mel / Casais", ["lua de mel", "honeymoon", "casal", "romantic", "romântic", "aniversário de casamento"]),
+    ("Despedida de solteiro(a)", ["despedida de solteir", "bachelor", "bachelorette", "stag do", "hen party"]),
+    ("Família", ["família", "familia", "kids", "crianças", "criancas", "family"]),
+    ("Grupo de amigos", ["galera", "amigos", "friends", "amigas"]),
+]
+
+
+def _publico_por_idioma(idioma):
+    if idioma in ("English", "Español"):
+        return "Turista internacional"
+    if idioma == "Português":
+        return "Público local/nacional"
+    return "Não classificado"
 
 
 def _match_keywords(texto, tabela):
@@ -78,12 +97,14 @@ def classificar_post(post_id, legenda, tem_collab, tags_manuais):
     """Tags manuais (data/content_tags.json) sempre vencem a heurística automática."""
     manual = tags_manuais.get(post_id, {})
     tema = manual.get("tema") or _match_keywords(legenda, TEMA_KEYWORDS) or ("Creators" if tem_collab else "Não classificado")
+    idioma = manual.get("idioma") or detectar_idioma(legenda)
+    publico = manual.get("publico") or _match_keywords(legenda, PUBLICO_KEYWORDS) or _publico_por_idioma(idioma)
     return {
         "tema": tema,
         "produto": manual.get("produto") or _match_keywords(legenda, PRODUTO_KEYWORDS) or "Não identificado",
-        "idioma": manual.get("idioma") or detectar_idioma(legenda),
+        "idioma": idioma,
         "gancho": manual.get("gancho") or "Não classificado",
-        "publico": manual.get("publico") or "Não classificado",
+        "publico": publico,
         "objetivo": manual.get("objetivo") or "Não classificado",
         "cta": manual.get("cta") or "Não classificado",
         "classificado_manualmente": bool(manual),
@@ -543,8 +564,9 @@ def main():
   </div>
 
   <div class="card mb-5">
-    <div style="font-weight:600;font-size:.9rem;margin-bottom:16px">🗂️ Por tipo de conteúdo</div>
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <div style="font-weight:600;font-size:.9rem;margin-bottom:4px">🗂️ Por tipo de conteúdo</div>
+    <div class="text-xs mb-4" style="color:var(--sub)">Tema, produto e idioma vêm de palavra-chave na legenda. Público-alvo tenta ocasião explícita na legenda (lua de mel, despedida de solteiro, família, grupo de amigos) e, sem isso, estima pelo idioma (estrangeiro → turista internacional, português → público local) — é a classificação mais fraca das quatro, trate como ponto de partida.</div>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
       <div>
         <div style="font-weight:600;font-size:.82rem;margin-bottom:10px;color:var(--sub)">Por tema</div>
         <div style="overflow-x:auto"><table><thead><tr><th>Valor</th><th style="text-align:right">Posts</th><th style="text-align:right">Alcance total</th><th style="text-align:right">Alcance médio</th><th style="text-align:right">Interações médias</th><th style="text-align:right">Índice intenção médio</th></tr></thead><tbody id="tbody-tema"></tbody></table></div>
@@ -556,6 +578,10 @@ def main():
       <div>
         <div style="font-weight:600;font-size:.82rem;margin-bottom:10px;color:var(--sub)">Por idioma</div>
         <div style="overflow-x:auto"><table><thead><tr><th>Valor</th><th style="text-align:right">Posts</th><th style="text-align:right">Alcance total</th><th style="text-align:right">Alcance médio</th><th style="text-align:right">Interações médias</th><th style="text-align:right">Índice intenção médio</th></tr></thead><tbody id="tbody-idioma"></tbody></table></div>
+      </div>
+      <div>
+        <div style="font-weight:600;font-size:.82rem;margin-bottom:10px;color:var(--sub)">Por público-alvo</div>
+        <div style="overflow-x:auto"><table><thead><tr><th>Valor</th><th style="text-align:right">Posts</th><th style="text-align:right">Alcance total</th><th style="text-align:right">Alcance médio</th><th style="text-align:right">Interações médias</th><th style="text-align:right">Índice intenção médio</th></tr></thead><tbody id="tbody-publico"></tbody></table></div>
       </div>
     </div>
   </div>
@@ -914,6 +940,7 @@ function aplicarFiltro() {{
   renderDimensao('tbody-tema', aggByDimensao(igRows, 'tema'));
   renderDimensao('tbody-produto', aggByDimensao(igRows, 'produto'));
   renderDimensao('tbody-idioma', aggByDimensao(igRows, 'idioma'));
+  renderDimensao('tbody-publico', aggByDimensao(igRows, 'publico'));
 
   // Aba Conteúdo — Creators
   renderCreators(buildCreatorRows(igRows), buildCreatorPostsMap(igRows));

@@ -83,9 +83,13 @@ duas vezes.
   tema "Cristo Redentor" mesmo se não for o assunto principal).
 - **Idioma** — detectado por contagem de palavras comuns de PT/EN/ES na legenda; heurística,
   não é 100% confiável para legendas curtas ou mistas.
-- **Gancho inicial, público provável, objetivo e CTA** — **não têm heurística automática**
-  (são subjetivos demais para inferir de forma confiável). Ficam "Não classificado" até
-  alguém preencher manualmente.
+- **Público-alvo** — a classificação **mais fraca das quatro automáticas**: primeiro tenta achar
+  ocasião explícita na legenda (`PUBLICO_KEYWORDS`: lua de mel, despedida de solteiro, família,
+  grupo de amigos); se não achar nada, estima só pelo idioma detectado (estrangeiro → "Turista
+  internacional", português → "Público local/nacional"). Isso é um chute grosseiro, não segmentação
+  de audiência de verdade — trate como ponto de partida e corrija manualmente sempre que puder.
+- **Gancho inicial, objetivo e CTA** — **não têm heurística automática** (são subjetivos demais
+  para inferir de forma confiável). Ficam "Não classificado" até alguém preencher manualmente.
 - **Creators**: alcance/interações/salvos/etc. por creator são **reais**, somados a partir dos
   posts com `collaborators` preenchido. **Custo, receita e ROI não existem em nenhuma API da
   Meta** — vêm de contrato e do Rezdy, fora do escopo deste conector.
