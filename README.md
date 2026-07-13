@@ -181,12 +181,42 @@ preserva o que já foi trazido no backfill. **Stories são a exceção**: a API 
 histórico retroativo, então nada anterior ao início da coleta pode ser recuperado, não importa
 o valor de `ORGANIC_LOOKBACK_DAYS`.
 
+## Aba "Exportação" (dado manual de planilha)
+
+Terceira aba do dashboard, para dado que **não vem de nenhuma API** — colado de export manual
+do Meta Business Suite (posts/Reels/Stories) e, futuramente, do Ads Manager. Existe porque:
+
+- O Business Suite dá números "oficiais" de `Visualizações` que a Graph API não expõe direito
+  para todo post.
+- O mesmo export de conteúdo traz, misturado, tanto os **posts publicados pela própria conta**
+  quanto **posts publicados por outras contas que marcaram/mencionaram a nossa** — isso é UGC de
+  creators/clientes, e a Graph API não dá nenhum acesso a dado de contas de terceiros. A aba
+  separa os dois casos automaticamente comparando o campo "Nome de usuário da conta" da planilha
+  com o `username` da própria conta (vindo de `meta_organic.json`).
+
+Rodar:
+
+```bash
+python scripts/importar_planilha_manual.py caminho/export1.csv caminho/export2.csv
+# ou, sem argumentos, processa tudo que estiver em data/manual_exports/
+python scripts/gerar_dashboard.py
+```
+
+Funde por chave (`post_id` + coluna "Data" do export, que normalmente é `"Total"` — um
+snapshot acumulado, não série diária) com o que já existe em `data/manual_content.json`:
+reimportar a mesma planilha (ex.: um export mais novo do mesmo período) atualiza os posts já
+conhecidos em vez de duplicar. Um export de Ads Manager (colunas como `Nome da campanha`,
+`Valor usado (BRL)`) ainda não tem uma planilha real para validar o schema — os dados desse
+tipo são preservados como vieram (sem normalização especulativa) e aparecem numa tabela genérica
+na aba.
+
 ## Estrutura
 
 ```
 connectors/
-  meta_organic.py       Cliente da Graph API (Facebook + Instagram orgânico)
+  meta_organic.py              Cliente da Graph API (Facebook + Instagram orgânico)
 scripts/
-  fetch_meta_organic.py CLI que roda o conector e salva o JSON
-data/                   Saída gerada (gitignored)
+  fetch_meta_organic.py        CLI que roda o conector e salva o JSON
+  importar_planilha_manual.py  Importa export manual do Business Suite/Ads Manager
+data/                          Saída gerada (gitignored, exceto curadoria manual)
 ```

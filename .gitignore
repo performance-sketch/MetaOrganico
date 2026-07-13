@@ -29,6 +29,13 @@ data/*.json
 # de nenhuma API — precisa ficar versionada, não é "dado gerado".
 !data/content_tags.json
 !data/creators.json
+# Exceção: dado importado manualmente de planilhas (Business Suite/Ads Manager),
+# também não vem de nenhuma API — precisa persistir entre execuções.
+!data/manual_content.json
+
+# Exports brutos (CSV) usados só como entrada do importador — não versionados,
+# o dado normalizado fica em data/manual_content.json.
+data/manual_exports/
 
 # IDEs
 .vscode/

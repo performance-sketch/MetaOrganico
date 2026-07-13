@@ -19,6 +19,7 @@ ADS_FILE      = ROOT / "data" / "meta_ads_snapshot.json"
 STORIES_FILE  = ROOT / "data" / "meta_stories_history.json"
 TAGS_FILE     = ROOT / "data" / "content_tags.json"
 CREATORS_FILE = ROOT / "data" / "creators.json"
+MANUAL_FILE   = ROOT / "data" / "manual_content.json"
 INDEX_FILE    = ROOT / "index.html"
 
 # Classificação automática por palavras-chave na legenda — é uma heurística
@@ -341,6 +342,37 @@ def build_story_rows(stories):
     return rows
 
 
+def build_manual_rows(posts, conta_propria):
+    """Achata data/manual_content.json (posts ou stories importados de planilha
+    do Meta Business Suite) no mesmo formato flat das outras tabelas, marcando
+    quais são da própria conta vs. menções publicadas por contas de terceiros
+    (o mesmo export inclui os dois casos — Business Suite reporta conteúdo
+    tagueado, não só o que a conta publicou)."""
+    conta_propria = (conta_propria or "").lower()
+    rows = []
+    for p in posts:
+        conta = (p.get("conta") or "")
+        rows.append({
+            "id": p.get("chave", ""),
+            "post_id": p.get("post_id", ""),
+            "data": (p.get("publicado_em") or "")[:10],
+            "conta": conta,
+            "propria": bool(conta_propria) and conta.lower() == conta_propria,
+            "tipo": p.get("tipo") or "",
+            "legenda": (p.get("descricao") or "")[:140],
+            "link": p.get("link") or "",
+            "visualizacoes": p.get("visualizacoes"),
+            "alcance": p.get("alcance"),
+            "curtidas": p.get("curtidas"),
+            "compartilhamentos": p.get("compartilhamentos"),
+            "comentarios": p.get("comentarios"),
+            "salvamentos": p.get("salvamentos"),
+            "seguimentos": p.get("seguimentos"),
+        })
+    rows.sort(key=lambda r: r["data"], reverse=True)
+    return rows
+
+
 def main():
     dados = json.loads(DATA_FILE.read_text(encoding="utf-8"))
     perfil     = dados.get("instagram", {}).get("perfil", {})
@@ -367,6 +399,15 @@ def main():
     if STORIES_FILE.exists():
         stories = json.loads(STORIES_FILE.read_text(encoding="utf-8"))
     story_rows = build_story_rows(stories)
+
+    manual = load_json_or_empty(MANUAL_FILE)
+    manual.setdefault("posts", [])
+    manual.setdefault("stories", [])
+    manual.setdefault("ads", [])
+    manual_rows       = build_manual_rows(manual["posts"], perfil.get("username"))
+    manual_story_rows = build_manual_rows(manual["stories"], perfil.get("username"))
+    manual_ads        = manual["ads"]
+    manual_atualizado = manual.get("atualizado_em", "")
 
     # Janela fixa dos últimos 30 dias — só para comparar com o snapshot de Meta
     # Ads (que também é sempre 30d). Independente do calendário do dashboard.
@@ -399,6 +440,9 @@ def main():
     creators_manual_json = safe(json.dumps(creators_manual, ensure_ascii=False))
     conta_series_json    = safe(json.dumps({k: dict(v) for k, v in series_conta.items()}, ensure_ascii=False))
     trend_labels_json    = safe(json.dumps(TREND_LABELS, ensure_ascii=False))
+    manual_rows_json       = safe(json.dumps(manual_rows, ensure_ascii=False))
+    manual_story_rows_json = safe(json.dumps(manual_story_rows, ensure_ascii=False))
+    manual_ads_json         = safe(json.dumps(manual_ads, ensure_ascii=False))
 
     if ads:
         ads_section_html = f"""
@@ -521,6 +565,7 @@ def main():
   <div class="tabs mb-5">
     <button class="tab-btn active" data-tab="geral" onclick="mudarAba('geral')">📊 Visão Geral</button>
     <button class="tab-btn" data-tab="conteudo" onclick="mudarAba('conteudo')">🧭 KPIs de Conteúdo</button>
+    <button class="tab-btn" data-tab="exportacao" onclick="mudarAba('exportacao')">📤 Exportação</button>
   </div>
 
   <div id="tab-geral">
@@ -738,6 +783,73 @@ def main():
   </div>
   </div><!-- /tab-conteudo -->
 
+  <div id="tab-exportacao" style="display:none">
+  <div class="card mb-5" style="border-color:var(--indigo);background:rgba(99,102,241,.06)">
+    <div class="text-sm">📤 <strong>Exportação manual</strong>: dado colado de planilhas do Meta Business Suite / Ads Manager, não da Graph API — importado via <code>scripts/importar_planilha_manual.py</code> (rode-o de novo com um export mais recente e depois <code>scripts/gerar_dashboard.py</code> para atualizar). O mesmo export do Business Suite traz tanto os <strong>posts publicados pela própria conta</strong> quanto <strong>menções/marcações feitas por outras contas</strong> — as duas seções abaixo separam os dois casos. Última importação: <strong id="exportacao-atualizado">—</strong>.</div>
+  </div>
+
+  <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-5">
+    <div class="card"><div class="kpi-label">Posts próprios importados</div><div class="kpi-val" id="kpi-exp-proprios">…</div></div>
+    <div class="card"><div class="kpi-label">Menções de terceiros</div><div class="kpi-val" id="kpi-exp-mencoes">…</div></div>
+    <div class="card"><div class="kpi-label">Contas diferentes mencionando</div><div class="kpi-val" id="kpi-exp-contas">…</div></div>
+    <div class="card"><div class="kpi-label">Visualizações (próprios)</div><div class="kpi-val" id="kpi-exp-views">…</div></div>
+    <div class="card"><div class="kpi-label">Alcance (próprios)</div><div class="kpi-val" id="kpi-exp-alcance">…</div></div>
+    <div class="card"><div class="kpi-label">Stories importados</div><div class="kpi-val" id="kpi-exp-stories">…</div></div>
+  </div>
+
+  <div class="card mb-5">
+    <div style="font-weight:600;font-size:.9rem;margin-bottom:4px">📈 Nossos posts — tendência mensal (dado oficial do Business Suite)</div>
+    <div class="text-xs mb-4" style="color:var(--sub)">Soma por mês de publicação. Alcance/visualizações e engajamento vêm em gráficos separados porque têm ordens de grandeza bem diferentes — juntos, um esconderia o outro. Clique na legenda para isolar uma métrica.</div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div>
+        <div style="font-weight:600;font-size:.82rem;margin-bottom:10px;color:var(--sub)">Alcance e visualizações</div>
+        <div style="position:relative;height:280px"><canvas id="chartExportacaoAlcance"></canvas></div>
+      </div>
+      <div>
+        <div style="font-weight:600;font-size:.82rem;margin-bottom:10px;color:var(--sub)">Engajamento (curtidas, comentários, compart., salvos)</div>
+        <div style="position:relative;height:280px"><canvas id="chartExportacaoEngajamento"></canvas></div>
+      </div>
+    </div>
+    <div id="exportacao-mensal-vazio" style="display:none;color:var(--sub);font-size:.85rem;margin-top:12px">Nenhum post próprio importado ainda no período selecionado.</div>
+  </div>
+
+  <div class="card mb-5">
+    <div style="font-weight:600;font-size:.9rem;margin-bottom:4px">🗣️ Menções de outras contas — <span id="mencoes-count">0</span></div>
+    <div class="text-xs mb-4" style="color:var(--sub)">Posts publicados por contas de terceiros que marcaram/mencionaram a nossa conta — vem do mesmo export, a Graph API não dá acesso a isso para contas que não são a nossa.</div>
+    <div style="overflow-x:auto;max-height:420px">
+      <table>
+        <thead><tr>
+          <th>Data</th><th>Conta</th><th>Tipo</th><th>Legenda</th>
+          <th style="text-align:right">Visualizações</th><th style="text-align:right">Alcance</th>
+          <th style="text-align:right">Curtidas</th><th style="text-align:right">Compart.</th>
+          <th>Link</th>
+        </tr></thead>
+        <tbody id="mencoes-body"></tbody>
+      </table>
+    </div>
+    <div id="mencoes-empty" style="display:none;color:var(--sub);font-size:.85rem">Nenhuma menção de terceiros importada ainda no período selecionado.</div>
+  </div>
+
+  <div class="card mb-5">
+    <div style="font-weight:600;font-size:.9rem;margin-bottom:4px">📸 Stories — importados de planilha</div>
+    <div id="exportacao-stories-vazio" style="color:var(--sub);font-size:.85rem">Nenhum story importado ainda. Exporte o relatório de Stories do Meta Business Suite e rode <code>scripts/importar_planilha_manual.py</code>.</div>
+    <div style="overflow-x:auto;max-height:400px">
+      <table>
+        <thead><tr><th>Data</th><th>Conta</th><th style="text-align:right">Alcance</th><th style="text-align:right">Compart.</th><th>Link</th></tr></thead>
+        <tbody id="exportacao-stories-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card mb-5">
+    <div style="font-weight:600;font-size:.9rem;margin-bottom:4px">💰 Meta Ads — importado de planilha</div>
+    <div id="exportacao-ads-vazio" style="color:var(--sub);font-size:.85rem">Nenhum export de Ads Manager importado ainda. Rode <code>scripts/importar_planilha_manual.py</code> com o CSV do Ads Manager — as colunas são preservadas como vieram, sem normalização.</div>
+    <div style="overflow-x:auto;max-height:400px">
+      <table><thead><tr id="exportacao-ads-head"></tr></thead><tbody id="exportacao-ads-body"></tbody></table>
+    </div>
+  </div>
+  </div><!-- /tab-exportacao -->
+
 <script>
 const IG_ROWS_ALL     = {ig_rows_json};
 const FB_ROWS_ALL     = {fb_rows_json};
@@ -746,6 +858,10 @@ const ADS             = {ads_json};
 const ORGANICO_30D    = {organico_30d_json};
 const CREATORS_MANUAL = {creators_manual_json};
 const CONTA_SERIES    = {conta_series_json};
+const MANUAL_ROWS_ALL       = {manual_rows_json};
+const MANUAL_STORY_ROWS_ALL = {manual_story_rows_json};
+const MANUAL_ADS            = {manual_ads_json};
+const MANUAL_ATUALIZADO     = {json.dumps(manual_atualizado)};
 
 const fN = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('pt-BR');
 const trunc = (s, n) => (s || '').length > n ? s.slice(0, n) + '…' : (s || '—');
@@ -906,10 +1022,13 @@ function renderCreators(creatorRows, creatorPostsMap) {{
 }}
 
 let chartFormatoInstance = null;
+let chartExportacaoAlcanceInstance = null;
+let chartExportacaoEngajamentoInstance = null;
 
 function mudarAba(nome) {{
   document.getElementById('tab-geral').style.display = nome === 'geral' ? '' : 'none';
   document.getElementById('tab-conteudo').style.display = nome === 'conteudo' ? '' : 'none';
+  document.getElementById('tab-exportacao').style.display = nome === 'exportacao' ? '' : 'none';
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === nome));
 }}
 
@@ -1155,6 +1274,94 @@ function aplicarFiltro() {{
 
   // Aba Conteúdo — Creators
   renderCreators(buildCreatorRows(igRows), buildCreatorPostsMap(igRows));
+
+  // Aba Exportação
+  renderExportacao(filtrarPeriodo(MANUAL_ROWS_ALL, de, ate), filtrarPeriodo(MANUAL_STORY_ROWS_ALL, de, ate));
+}}
+
+function aggMensal(rows, campos) {{
+  const porMes = {{}};
+  rows.forEach(r => {{
+    if (!r.data) return;
+    const mes = r.data.slice(0, 7);
+    if (!porMes[mes]) porMes[mes] = Object.fromEntries(campos.map(c => [c, 0]));
+    campos.forEach(c => {{ porMes[mes][c] += (r[c] || 0); }});
+  }});
+  const meses = Object.keys(porMes).sort();
+  return {{ meses, porMes }};
+}}
+
+function renderExportacao(rows, storyRows) {{
+  const proprios = rows.filter(r => r.propria);
+  const mencoes = rows.filter(r => !r.propria).sort((a, b) => (b.data || '').localeCompare(a.data || ''));
+
+  setText('exportacao-atualizado', MANUAL_ATUALIZADO || '—');
+  setText('kpi-exp-proprios', fN(proprios.length));
+  setText('kpi-exp-mencoes', fN(mencoes.length));
+  setText('kpi-exp-contas', fN(new Set(mencoes.map(r => r.conta).filter(Boolean)).size));
+  setText('kpi-exp-views', fN(somaCampo(proprios, 'visualizacoes')));
+  setText('kpi-exp-alcance', fN(somaCampo(proprios, 'alcance')));
+  setText('kpi-exp-stories', fN(storyRows.length));
+
+  const camposAlcance = ['visualizacoes', 'alcance'];
+  const camposEngajamento = ['curtidas', 'comentarios', 'compartilhamentos', 'salvamentos'];
+  const cores = {{ visualizacoes: '#6366f1', alcance: '#ec4899', curtidas: '#22c55e', compartilhamentos: '#f59e0b', comentarios: '#06b6d4', salvamentos: '#a855f7' }};
+  const {{ meses, porMes }} = aggMensal(proprios, camposAlcance.concat(camposEngajamento));
+
+  document.getElementById('exportacao-mensal-vazio').style.display = meses.length ? 'none' : '';
+
+  const linhaChart = (canvasId, campos) => {{
+    if (!meses.length) return null;
+    return new Chart(document.getElementById(canvasId), {{
+      type: 'line',
+      data: {{
+        labels: meses,
+        datasets: campos.map(c => ({{
+          label: rotuloMetrica[c] || c, data: meses.map(m => porMes[m][c]),
+          borderColor: cores[c], backgroundColor: cores[c], tension: .3,
+        }})),
+      }},
+      options: {{
+        responsive: true, maintainAspectRatio: false,
+        plugins: {{ legend: {{ labels: {{ color: '#f1f5f9' }} }} }},
+        scales: {{ x: {{ ticks: {{ color: '#94a3b8' }}, grid: {{ display: false }} }}, y: {{ ticks: {{ color: '#94a3b8' }}, grid: {{ color: 'rgba(51,65,85,.4)' }} }} }},
+      }},
+    }});
+  }};
+  if (chartExportacaoAlcanceInstance) {{ chartExportacaoAlcanceInstance.destroy(); chartExportacaoAlcanceInstance = null; }}
+  if (chartExportacaoEngajamentoInstance) {{ chartExportacaoEngajamentoInstance.destroy(); chartExportacaoEngajamentoInstance = null; }}
+  chartExportacaoAlcanceInstance = linhaChart('chartExportacaoAlcance', camposAlcance);
+  chartExportacaoEngajamentoInstance = linhaChart('chartExportacaoEngajamento', camposEngajamento);
+
+  setText('mencoes-count', fN(mencoes.length));
+  document.getElementById('mencoes-empty').style.display = mencoes.length ? 'none' : '';
+  preencherTabela('mencoes-body', mencoes, r => `<tr>
+    <td style="white-space:nowrap">${{r.data}}</td>
+    <td>@${{r.conta || '—'}}</td>
+    <td><span class="badge badge-pink">${{r.tipo || '—'}}</span></td>
+    <td title="${{(r.legenda || '').replace(/"/g, '&quot;')}}">${{trunc(r.legenda, 50)}}</td>
+    <td style="text-align:right">${{fN(r.visualizacoes)}}</td>
+    <td style="text-align:right">${{fN(r.alcance)}}</td>
+    <td style="text-align:right">${{fN(r.curtidas)}}</td>
+    <td style="text-align:right">${{fN(r.compartilhamentos)}}</td>
+    <td>${{r.link ? `<a class="perm" href="${{r.link}}" target="_blank">abrir</a>` : '—'}}</td>
+  </tr>`);
+
+  document.getElementById('exportacao-stories-vazio').style.display = storyRows.length ? 'none' : '';
+  preencherTabela('exportacao-stories-body', storyRows, r => `<tr>
+    <td style="white-space:nowrap">${{r.data}}</td>
+    <td>@${{r.conta || '—'}}</td>
+    <td style="text-align:right">${{fN(r.alcance)}}</td>
+    <td style="text-align:right">${{fN(r.compartilhamentos)}}</td>
+    <td>${{r.link ? `<a class="perm" href="${{r.link}}" target="_blank">abrir</a>` : '—'}}</td>
+  </tr>`);
+
+  document.getElementById('exportacao-ads-vazio').style.display = MANUAL_ADS.length ? 'none' : '';
+  if (MANUAL_ADS.length) {{
+    const colunas = Object.keys(MANUAL_ADS[0]);
+    document.getElementById('exportacao-ads-head').innerHTML = colunas.map(c => `<th>${{c}}</th>`).join('');
+    preencherTabela('exportacao-ads-body', MANUAL_ADS, r => `<tr>${{colunas.map(c => `<td>${{r[c] ?? '—'}}</td>`).join('')}}</tr>`);
+  }}
 }}
 
 const TODAS_DATAS = IG_ROWS_ALL.concat(FB_ROWS_ALL).map(r => r.data).filter(Boolean);
